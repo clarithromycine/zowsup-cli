@@ -16,6 +16,7 @@ import json
 import shlex
 import inspect
 import asyncio
+import time
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -97,6 +98,7 @@ class InteractiveThread:
         self._patched_stream_handlers = []
         self.logger = bot.logger if bot else logging.getLogger(__name__)
         self._already_disconnected = False  # Flag to prevent duplicate disconnect calls
+        self._event_loop = None  # Event loop reference for signal handling
 
     def _iter_stream_handlers(self):
         """Yield all StreamHandlers from root and child loggers."""
@@ -208,8 +210,27 @@ class InteractiveThread:
         cf_logger = logging.getLogger("concurrent.futures")
         cf_logger.setLevel(logging.CRITICAL)  # Only show critical errors, not ERROR logs
         
+        # Store loop reference for signal handler
+        self._event_loop = loop
+        
         try:
+            # Add signal handler for Ctrl+C to gracefully shutdown
+            try:
+                import signal
+                loop.add_signal_handler(
+                    signal.SIGINT,
+                    self._handle_interrupt,
+                    loop
+                )
+                self.logger.debug("Signal handler registered for Ctrl+C")
+            except (NotImplementedError, ValueError) as e:
+                # Signal handlers not supported on Windows for Ctrl+C
+                # Will rely on KeyboardInterrupt exception handling instead
+                self.logger.debug(f"Signal handler not available: {e}")
+            
             loop.run_until_complete(self._async_main())            
+        except KeyboardInterrupt:
+            self.logger.info("Interrupted by user (Ctrl+C)")
         finally:
             # Cancel any remaining tasks to avoid "Task was destroyed" warnings
             try:
@@ -226,6 +247,13 @@ class InteractiveThread:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", RuntimeWarning)
                     loop.close()
+                self._event_loop = None
+    
+    def _handle_interrupt(self, loop):
+        """Handle SIGINT (Ctrl+C) signal - gracefully shutdown event loop"""
+        self.logger.info("Received Ctrl+C signal, initiating shutdown...")
+        # Stop the event loop
+        loop.stop()
     
     async def _async_main(self):
         """Main async prompt loop - supports interactive account management"""
@@ -240,27 +268,44 @@ class InteractiveThread:
             # Run bot in background task to handle its event loop
             bot_task = asyncio.ensure_future(self.bot._async_run())
             
-            # Wait for login in the bot's event loop
+            # Wait for login in the bot's event loop with timeout
             try:
-                # Give bot a moment to start, then check login status periodically
-                for attempt in range(60):  # 60 seconds = 120 * 0.5s waits
+                # Use wait_for with timeout to make the wait interruptible
+                # Check status periodically (0.5s intervals) for 60 seconds max
+                start_time = time.time()
+                login_timeout = 60
+                check_interval = 0.5
+                
+                while True:
+                    elapsed = time.time() - start_time
+                    if elapsed > login_timeout:
+                        self.logger.info("BOT %s connection timeout" % self.bot.botId)
+                        self.bot = None
+                        break
+                    
                     if self.bot.status == ZowBotStatus.STATUS_RUNNING:
                         self.logger.info("BOT %s ready." % self.bot.botId)
                         break
                     elif self.bot.status in (ZowBotStatus.STATUS_INITIAL, ZowBotStatus.STATUS_UNKNOWN):
-                        await asyncio.sleep(0.5)
+                        # Use wait_for to make asyncio.sleep interruptible
+                        try:
+                            await asyncio.wait_for(asyncio.sleep(check_interval), timeout=check_interval + 0.1)
+                        except asyncio.TimeoutError:
+                            pass  # Expected - just continue the loop
                     elif self.bot.botLayer.detect40x:
                         self.logger.info("BOT %s login failed" % self.bot.botId)
                         self.bot = None
                         break
                     else:
                         break
-                else:
-                    # Timeout after 60 seconds
-                    self.logger.info("BOT %s connection timeout" % self.bot.botId)
-                    self.bot = None
+                        
+            except asyncio.CancelledError:
+                self.logger.info("Login wait cancelled by user")
+                self.bot = None
+                raise
             except Exception as e:
                 self.logger.info(f"BOT {self.bot.botId} login failed: {e}")
+                self.bot = None
                 self.bot = None
         else:
             self.logger.info("No initial account")

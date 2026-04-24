@@ -5,7 +5,6 @@ sys.path.append(os.getcwd())
 import configparser
 from core.common import YowConstants
 from core.layers import EventCallback, YowLayerEvent
-from core.layers.axolotl.protocolentities.iq_keys_get_result import ResultGetKeysIqProtocolEntity
 from core.layers.interface  import YowInterfaceLayer, ProtocolEntityCallback
 from core.layers.network.layer import YowNetworkLayer
 from core.layers.protocol_messages.protocolentities  import *
@@ -799,7 +798,7 @@ class ZowBotLayer(YowInterfaceLayer):
         except Exception as e:
             self.logger.error(f"Failed to load AI config: {e}", exc_info=True)
             return {
-                'ai_llm_active': {'enabled': True, 'backend': 'GLM'},
+                'ai_llm_active': {'enabled': False, 'backend': 'GLM'},
                 'ai_llm_glm': {'auth_mode': 'apikey', 'api_key': '', 'model': 'glm-4-plus'},
                 'ai_llm_qwen': {'auth_mode': 'apikey', 'api_key': '', 'model': 'qwen-plus'},
                 'ai_memory': {'memory_window_days': 3, 'cleanup_strategy': 'first_daily_message'},

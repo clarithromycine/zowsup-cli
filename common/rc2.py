@@ -56,7 +56,7 @@ class RC2:
             else:
                 raise Exception("payload header mismatch")
         else:
-            raise ValueError(f"payload size mismatch: {filePath}")        
+            raise ValueError(f"payload size mismatch")        
 
 
     def decrypt_token_from_rc2(filePath,phoneNumber) -> Any:

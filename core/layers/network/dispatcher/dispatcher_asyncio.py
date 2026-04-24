@@ -17,6 +17,7 @@ from ....layers.network.dispatcher.dispatcher import (
     ConnectionCallbacks,
     YowConnectionDispatcher,
 )
+from conf.network_config import CONNECT_TIMEOUT, READ_TIMEOUT, WRITE_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +74,23 @@ class AsyncioConnectionDispatcher(YowConnectionDispatcher):
             return
         try:
             self._writer.write(data)
-            # drain is a coroutine — schedule it without blocking
-            asyncio.ensure_future(self._writer.drain())
+            # drain is a coroutine — schedule it without blocking, with timeout
+            asyncio.ensure_future(self._safe_drain())
         except Exception:
             logger.exception("Error sending data")
+            self.disconnect()
+    
+    async def _safe_drain(self) -> None:
+        """Drain write buffer with timeout."""
+        if self._writer is None:
+            return
+        try:
+            await asyncio.wait_for(self._writer.drain(), timeout=WRITE_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning("Write drain timeout after %ds", WRITE_TIMEOUT)
+            self.disconnect()
+        except Exception as exc:
+            logger.error("Write drain error: %s", exc)
             self.disconnect()
 
     # ------------------------------------------------------------------
@@ -86,7 +100,10 @@ class AsyncioConnectionDispatcher(YowConnectionDispatcher):
     async def _async_connect(self, host: Tuple[str, int]) -> None:
         """Open a TCP connection (with optional SOCKS5 proxy)."""
         try:
-            reader, writer = await self._open_connection(host)
+            reader, writer = await asyncio.wait_for(
+                self._open_connection(host),
+                timeout=CONNECT_TIMEOUT
+            )
             self._reader = reader
             self._writer = writer
             self._connected = True
@@ -94,6 +111,12 @@ class AsyncioConnectionDispatcher(YowConnectionDispatcher):
             await self.connectionCallbacks.onConnected()
             # Start the read loop as a background task
             self._read_task = asyncio.ensure_future(self._read_loop())
+        except asyncio.TimeoutError:
+            logger.error("Connection timeout to %s:%d after %ds", *host, CONNECT_TIMEOUT)
+            self._connected = False
+            await self.connectionCallbacks.onConnectionError(
+                TimeoutError(f"Connection to {host[0]}:{host[1]} timed out after {CONNECT_TIMEOUT}s")
+            )
         except Exception as exc:
             logger.error("Connection failed: %s", exc)
             self._connected = False
@@ -134,12 +157,19 @@ class AsyncioConnectionDispatcher(YowConnectionDispatcher):
         """Continuously read from the stream and deliver to the layer above."""
         assert self._reader is not None
         try:
-            while True:                
-                data = await self._reader.read(_DEFAULT_READ_SIZE)                
-                if not data:
-                    logger.debug("Remote end closed connection (EOF)")
+            while True:
+                try:
+                    data = await asyncio.wait_for(
+                        self._reader.read(_DEFAULT_READ_SIZE),
+                        timeout=READ_TIMEOUT
+                    )
+                    if not data:
+                        logger.debug("Remote end closed connection (EOF)")
+                        break
+                    await self.connectionCallbacks.onRecvData(data)
+                except asyncio.TimeoutError:
+                    logger.warning("Read timeout after %ds, disconnecting", READ_TIMEOUT)
                     break
-                await self.connectionCallbacks.onRecvData(data)
         except asyncio.CancelledError:
             logger.debug("Read loop cancelled")
             return

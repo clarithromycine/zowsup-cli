@@ -84,7 +84,14 @@ class Main(ConsoleMain):
             interactive_thread.run()
             logger.info("InteractiveThread started, waiting for completion...")
             # Wait for the interactive thread to complete (user exits)
-            interactive_thread.thread.join()
+            # Use timeout loop to allow Ctrl+C to be responsive even during connection
+            try:
+                while interactive_thread.thread.is_alive():
+                    interactive_thread.thread.join(timeout=0.1)
+            except KeyboardInterrupt:
+                logger.info("Main thread interrupted by user (Ctrl+C)")
+                # Thread will clean up gracefully via its own KeyboardInterrupt handler
+                interactive_thread.thread.join(timeout=5)
             logger.info("InteractiveThread completed, exiting.")
         else:
             # Command execution mode: account + command
