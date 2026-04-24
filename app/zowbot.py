@@ -13,6 +13,8 @@ import traceback
 import uuid
 from typing import Dict, List
 
+from common.utils import Utils
+
 sys.path.append(os.getcwd())
 
 # ============================================================================
@@ -35,7 +37,6 @@ from core.layers import YowLayerEvent
 from core.layers.network import YowNetworkLayer
 from core.profile.profile import YowProfile
 from core.stacks import YowStackBuilder
-from core.structs import ProtocolEntity
 
 # ============================================================================
 # Local Imports - App
@@ -76,16 +77,8 @@ class ZowBot:
         self.auto = auto    #是否自动登录
 
         osName = self.env.deviceEnv.getOSName()
-
-        match osName:
-            case "Android":
-                self.idType = ProtocolEntity.ID_TYPE_ANDROID            
-            case "SMBA":
-                self.idType = ProtocolEntity.ID_TYPE_SMB_ANDROID            
-            case "iOS":
-                self.idType = ProtocolEntity.ID_TYPE_IOS
-            case "SMB iOS":
-                self.idType = ProtocolEntity.ID_TYPE_SMB_IOS
+        
+        self.idType = Utils.getIdTypeByOsName(osName)
 
         if self.botId is not None:   
             path = SysVar.TMP_ACCOUNT_PATH if bot_type==ZowBotType.TYPE_RUN_TEMP else SysVar.ACCOUNT_PATH 

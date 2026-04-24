@@ -79,7 +79,35 @@ class Utils:
 
     @staticmethod
     def violationTypeName(violation_type) -> Any:
-        return Utils.VIOLATION_TYPE_MAP.get(violation_type, "UNKNOWN")    
+        return Utils.VIOLATION_TYPE_MAP.get(violation_type, "UNKNOWN")
+    
+    @staticmethod
+    def getIdTypeByOsName(os_name: str) -> Any:
+        """
+        Map OS name to WhatsApp protocol entity ID type.
+        
+        Args:
+            os_name: Device OS name (e.g., 'Android', 'iOS', 'SMBA', 'SMB iOS')
+        
+        Returns:
+            ProtocolEntity.ID_TYPE_* constant
+        
+        Raises:
+            ValueError: If OS name is not supported
+        """
+        from core.structs import ProtocolEntity
+        
+        os_type_map = {
+            "Android": ProtocolEntity.ID_TYPE_ANDROID,
+            "SMBA": ProtocolEntity.ID_TYPE_SMB_ANDROID,
+            "iOS": ProtocolEntity.ID_TYPE_IOS,
+            "SMB iOS": ProtocolEntity.ID_TYPE_SMB_IOS,
+        }
+        
+        if os_name not in os_type_map:
+            raise ValueError(f"Unsupported OS: {os_name}. Supported values: {list(os_type_map.keys())}")
+        
+        return os_type_map[os_name]
 
     #单项指令
     @staticmethod
