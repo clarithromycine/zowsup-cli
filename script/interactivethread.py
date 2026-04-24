@@ -217,15 +217,18 @@ class InteractiveThread:
             # Add signal handler for Ctrl+C to gracefully shutdown
             try:
                 import signal
-                loop.add_signal_handler(
-                    signal.SIGINT,
-                    self._handle_interrupt,
-                    loop
-                )
-                self.logger.debug("Signal handler registered for Ctrl+C")
-            except (NotImplementedError, ValueError) as e:
-                # Signal handlers not supported on Windows for Ctrl+C
-                # Will rely on KeyboardInterrupt exception handling instead
+                if threading.current_thread() is threading.main_thread():
+                    loop.add_signal_handler(
+                        signal.SIGINT,
+                        self._handle_interrupt,
+                        loop
+                    )
+                    self.logger.debug("Signal handler registered for Ctrl+C")
+                else:
+                    # asyncio signal handlers are only valid on the main thread.
+                    self.logger.debug("Skipping signal handler registration in non-main thread")
+            except (NotImplementedError, ValueError, RuntimeError) as e:
+                # Signal handlers may be unsupported on this platform/runtime.
                 self.logger.debug(f"Signal handler not available: {e}")
             
             loop.run_until_complete(self._async_main())            
