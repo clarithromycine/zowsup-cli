@@ -76,12 +76,12 @@ class LiteContactStore(TaskMsgStore):
 
         if jid is not None:
             q = "DELETE FROM contact where jid = ?"
-            self.dbConn.cursor().execute(q, (jid))
+            self.dbConn.cursor().execute(q, (jid,))
             self.dbConn.commit()        
 
         elif lid is not None:
             q = "DELETE FROM contact where lid = ?"
-            self.dbConn.cursor().execute(q, (lid))
+            self.dbConn.cursor().execute(q, (lid,))
             self.dbConn.commit()        
 
         return True

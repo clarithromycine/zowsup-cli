@@ -37,7 +37,6 @@ from core.common.tools import WATools
 from core.layers.protocol_media.mediacipher import MediaCipher
 from core.common.tools import Jid
 import requests,logging,io,os,time,mimetypes,base64,random,threading,qrcode
-from core.common.optionalmodules import PILOptionalModule
 from conf.constants import SysVar
 from proto import wa_struct_pb2
 from core.profile.profile import YowProfile
@@ -46,11 +45,8 @@ from .zowbot_values import ZowBotType,ZowBotStatus
 from axolotl.ecc.curve import Curve
 from axolotl.ecc.djbec import *
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from fcm_push_receiver.fcm_module import FcmModule
-import datetime
 import requests
 from proto import zowsup_pb2
-import names,json
 
 from core.layers.protocol_presence.protocolentities.presence_subscribe import SubscribePresenceProtocolEntity
 
@@ -124,8 +120,6 @@ class ZowBotLayer(YowInterfaceLayer):
         
         # AI auto-reply service (Phase 1: Mock mode)
         self.ai_service = None
-
-
 
     async def _sendIqAsync(self, entity):
         """
@@ -201,18 +195,7 @@ class ZowBotLayer(YowInterfaceLayer):
             self.logger.error(f"Command '{command_name}' failed: {e}")
             raise
                         
-    def setMsgMap(self,taskId,targets,msgId):
-        if taskId is not None:
-            array = targets.split(",")
-            for target in array:
-                self.msgMap[taskId+"-"+target] = msgId
 
-    def getMsgIdFromMsgMap(self,taskId,target):
-        if taskId is None:
-            return None        
-        if (taskId+"-"+target) in self.msgMap:
-            return  self.msgMap[taskId+"-"+target]
-        return None
 
     def genProfile(self,device_identity):
         regInfo = self.getProp("reg_info")
@@ -280,8 +263,7 @@ class ZowBotLayer(YowInterfaceLayer):
             })          
 
         self.isConnected = False
-        
-        # Phase 1.5: Stop background retry task when disconnecting
+                
         if self.ai_service:
             self.ai_service.cancel_retry_task()
                    
@@ -299,7 +281,7 @@ class ZowBotLayer(YowInterfaceLayer):
                     "event":zowsup_pb2.BotEvent.Event.QUIT
                 })          
                 if self.db:
-                    self.db._store.dbConn.close()       #关闭该号码的sqlite数据库连接                  
+                    self.db._store.dbConn.close()                       
                 self.setProp("QUITTED",True)
             else:
                 #HC模式休息1秒就好，啥都不用做                        
@@ -316,20 +298,16 @@ class ZowBotLayer(YowInterfaceLayer):
         
         if isinstance(entity,SafetynetRequestIbProtocolEntity):
             self.logger.info("Ib-safetynet-request: %s" % entity.nonce)
-            self.safetynet([entity.nonce],{})
+            await self.safetynet([entity.nonce],{})
 
 
     async def gpia(self,params,options):
-
         self.logger.info("no adp support , so ignore it ")
-
         return "JUSTWAIT"
 
 
-    def safetynet(self,params,options):
-
+    async def safetynet(self,params,options):
         self.logger.info("no adp support , so ignore it ")
-
         return "JUSTWAIT"    
     
     @ProtocolEntityCallback("notification")
@@ -575,6 +553,11 @@ class ZowBotLayer(YowInterfaceLayer):
 
         if isinstance(entity,BusinessNameUpdateNotificationProtocolEntity):
             if entity.name is not None:
+                if entity.jid.endswith("@lid"):
+                    self.db._store.updateContact(None,lid = entity.jid,name=entity.name)                    
+                else:
+                    self.db._store.updateContact(jid = entity.jid,lid = None,name=entity.name)
+
                 self.callback({
                     "event":zowsup_pb2.BotEvent.Event.CONTACT_UPDATE,
                     "detail":{
@@ -1364,9 +1347,6 @@ class ZowBotLayer(YowInterfaceLayer):
             await self.bot._stack.broadcastEvent(YowLayerEvent(YowNetworkLayer.EVENT_STATE_DISCONNECT)) 
         else:
             logger.error("get fcm cat failed")
-
-
-
 
     async def resetSync(self,params,options):        
         try:
