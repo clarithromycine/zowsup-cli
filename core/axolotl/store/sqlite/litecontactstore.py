@@ -1,17 +1,18 @@
 from axolotl.state.taskmsgstore import TaskMsgStore
 
 import time
+import logging
 from typing import Any, Optional, Dict, List, Tuple
 
+logger = logging.getLogger(__name__)
 
 class LiteContactStore(TaskMsgStore):
 
-    def __init__(self, dbConn) -> None:
+    def __init__(self, dbConn):
         """
         :type dbConn: Connection
         """
-        self.dbConn = dbConn
-
+        self.dbConn = dbConn        
         dbConn.execute("CREATE TABLE IF NOT EXISTS contact(_id INTEGER PRIMARY KEY AUTOINCREMENT,"
                 "name TEXT,"
                 "jid TEXT,"
@@ -20,7 +21,7 @@ class LiteContactStore(TaskMsgStore):
                 "tctoken_ts INTEGER,"
                 "timestamp INTEGER);")                                    
                     
-    def updateContact(self, jid,lid, name=None) -> Any:
+    def updateContact(self, jid,lid, name=None):
 
         #检查jid和lid都要满足特定的条件，否则不加到联系人库里面
         if jid is not None and not jid.endswith("s.whatsapp.net"):
@@ -41,7 +42,7 @@ class LiteContactStore(TaskMsgStore):
         return None
 
 
-    def findContact(self,jid=None,lid=None) -> Any:
+    def findContact(self,jid=None,lid=None):      
 
         if jid is None and lid is None:
             return False
@@ -71,21 +72,21 @@ class LiteContactStore(TaskMsgStore):
 
         return False     
                                                     
-    def removeContact(self,jid,lid) -> Any:
+    def removeContact(self,jid,lid):
 
         if jid is not None:
             q = "DELETE FROM contact where jid = ?"
-            self.dbConn.cursor().execute(q, (jid,))
+            self.dbConn.cursor().execute(q, (jid))
             self.dbConn.commit()        
 
         elif lid is not None:
             q = "DELETE FROM contact where lid = ?"
-            self.dbConn.cursor().execute(q, (lid,))
+            self.dbConn.cursor().execute(q, (lid))
             self.dbConn.commit()        
 
         return True
     
-    def getAllContact(self) -> Any:
+    def getAllContact(self):
         #返回一个jid数组        
         q = "SELECT jid,lid FROM contact"
         c = self.dbConn.cursor()
@@ -101,7 +102,7 @@ class LiteContactStore(TaskMsgStore):
 
         return jids
     
-    def updateName(self,jid=None,lid=None,name=None) -> Any:
+    def updateName(self,jid=None,lid=None,name=None):
         if name is None:
             return 
         
@@ -118,10 +119,9 @@ class LiteContactStore(TaskMsgStore):
 
         return True
             
-    def updateTctoken(self, node) -> Any:
+    def updateTctoken(self, node):  #直接处理xmpp node，
 
         tctoken = None
-        tctoken_ts = None
         tokens = node.getChild("tokens")
         if tokens:
             token = tokens.getAllChildren()[0]
@@ -157,7 +157,7 @@ class LiteContactStore(TaskMsgStore):
                                             
         return True                        
 
-    def getTctoken(self,jid=None,lid=None) -> Any:
+    def getTctoken(self,jid=None,lid=None):               
 
         token = None
 
@@ -177,26 +177,15 @@ class LiteContactStore(TaskMsgStore):
 
         return token        
     
-    def removeTctoken(self,jid=None,lid=None) -> Any:
-        """
-        DO NOT USE THIS METHOD.
+    def removeTctoken(self,jid=None,lid=None):
+
+        if jid is not None:
+            q = "UPDATE contact SET tctoken=NULL,tctoken_ts=NULL WHERE jid=?"
+            self.dbConn.cursor().execute(q, (jid,))
         
-        tctoken should only be updated via updateTctoken(), never cleared to NULL.
-        If you need to clear an outdated token, call updateTctoken() with a fresh one instead.
-        
-        This method is deprecated and will not actually clear tctoken to prevent data loss.
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"removeTctoken called for jid={jid}, lid={lid} - "
-                      "tctoken should not be cleared. Use updateTctoken() to refresh instead.")
-        
-        # Do nothing - tctoken should only be updated, never removed
-        return False   
+        elif lid is not None:
+            q = "UPDATE contact SET tctoken=NULL,tctoken_ts=NULL WHERE lid=?"
+            self.dbConn.cursor().execute(q, (lid,))
 
-    
-
-
-
-
-
+        self.dbConn.commit()
+        return True   
