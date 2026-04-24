@@ -257,9 +257,7 @@ class InteractiveThread:
     
     async def _async_main(self):
         """Main async prompt loop - supports interactive account management"""
-        
-        self.logger.info(f"InteractiveThread starting - botId={self.bot.botId if self.bot else None}")
-        
+                                
         bot_task = None
         
         # If we have an initial bot, try to login

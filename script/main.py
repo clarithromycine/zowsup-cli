@@ -80,7 +80,7 @@ class Main(ConsoleMain):
             # Interactive mode: either no params, only account param, or no account
             logger.info(f"Starting interactive mode - botId={botId}, params={params}")
             interactive_thread = InteractiveThread(wabot, self.env, self)
-            logger.info("InteractiveThread created, starting...")
+            logger.debug("InteractiveThread created, starting...")
             interactive_thread.run()
             logger.info("InteractiveThread started, waiting for completion...")
             # Wait for the interactive thread to complete (user exits)
