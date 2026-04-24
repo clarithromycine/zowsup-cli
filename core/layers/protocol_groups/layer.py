@@ -66,7 +66,7 @@ class YowGroupsProtocolLayer(YowProtocolLayer):
             elif rNode.tag=="demote":
                 await self.toUpper(ResultIqProtocolEntity.fromProtocolTreeNode(node))
             elif rNode.tag=="leave":
-                await self.toUpper(ResultIqProtocolEntity.fromProtocolTreeNode(node))
+                await self.toUpper(SuccessLeaveGroupsIqProtocolEntity.fromProtocolTreeNode(node))
             elif rNode.tag=="invite":
                 await self.toUpper(SuccessGetInviteCodeGroupsIqProtocolEntity.fromProtocolTreeNode(node))
             elif rNode.tag in ["locked","unlocked","announcement","not_announcement","membership_approval_mode","membership_requests_action"]:

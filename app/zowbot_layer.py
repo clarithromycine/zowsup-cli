@@ -771,8 +771,6 @@ class ZowBotLayer(YowInterfaceLayer):
                 ai_config['ai_llm_glm']['auth_mode'] = conf.get('AI_LLM_GLM', 'auth_mode', fallback='apikey')
                 ai_config['ai_llm_glm']['api_key'] = conf.get('AI_LLM_GLM', 'api_key', fallback='')
 
-
-            
             # Read AI_LLM_QWEN section (NEW)
             if conf.has_section('AI_LLM_QWEN'):
                 ai_config['ai_llm_qwen']['model'] = conf.get('AI_LLM_QWEN', 'model', fallback='qwen-plus')
