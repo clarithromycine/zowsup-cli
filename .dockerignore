@@ -1,0 +1,17 @@
+# Docker ignore — keep build context lean
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+tests/
+*.log
+logs/
+data/dashboard.db
+data/backups/
+.git/
+.gitignore
+.env
+dashboard-frontend/node_modules/
+dashboard-frontend/.vite/
+dashboard-frontend/dist/

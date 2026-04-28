@@ -8,9 +8,13 @@ Coordinates:
 - Retry logic
 """
 
+import json
 import logging
+import re
+import sqlite3
+import time
 import asyncio
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from datetime import datetime, timedelta
 
 from app.ai_module.memory.memory import ConversationMemory
@@ -35,16 +39,22 @@ logger = logging.getLogger(__name__)
 class AIService:
     """Main AI service orchestrator."""
     
-    def __init__(self, db_path: str, config: Dict = None):
+    def __init__(self, db_path: str, config: Dict = None, dashboard_db_path: str = None):
         """
         Initialize AI service.
         
         Args:
             db_path: Path to account-specific SQLite database
-            config: Configuration dict with LLM settings            
+            config: Configuration dict with LLM settings
+            dashboard_db_path: Path to shared dashboard.db (Phase 2).
+                               If provided, AI thoughts + chat messages are
+                               written here for the analytics dashboard.
         """
         self.db_path = db_path
-        self.config = config or {}        
+        self.config = config or {}
+        self.dashboard_db_path = dashboard_db_path
+        # Phase 3: StrategyManager instance (set from zowbot_layer after init)
+        self.strategy_manager = None
         
         # Initialize components
         self.memory = ConversationMemory(db_path)
@@ -217,6 +227,16 @@ class AIService:
             # Step 3: Call AI backend with enhanced error handling
             # Initialize call log entry at the start of processing
             self.memory.log_call(msg_id, user_jid)
+
+            # Phase 3: Load active strategy for this user
+            system_extra = ""
+            strategy_info: dict = {}
+            if self.strategy_manager:
+                try:
+                    strategy_info = self.strategy_manager.get_active_strategy(user_jid)
+                    system_extra = self.strategy_manager.build_system_prompt_extra(user_jid)
+                except Exception as _se:
+                    logger.warning("Strategy load failed (ignored): %s", _se)
             
             if not self.backend.is_configured():
                 logger.warning("AI backend not configured, skipping processing")
@@ -234,7 +254,7 @@ class AIService:
                 return None
             
             try:
-                response = await self.backend.send_message(user_msg, memory_context)
+                response = await self.backend.send_message(user_msg, memory_context, system_extra=system_extra)
             except AIBackendException as e:
                 # Phase 1.5: Log failure with error details for retry
                 error_msg = str(e)
@@ -292,14 +312,207 @@ class AIService:
             
             # Mark call as successful
             self.memory._update_call_status(msg_id, 'success')
-                        
-            return response
+
+            # Phase 2: Build thought record + persist to dashboard.db (fire-and-forget)
+            from app.ai_module.models import AIResult, AIThought
+            thought = self._build_thought(user_msg=user_msg, response=response,
+                                          strategy_info=strategy_info)
+            if self.dashboard_db_path:
+                chat_msg_id = self._save_chat_messages_to_dashboard(
+                    user_jid=user_jid,
+                    bot_id=bot_id or "",
+                    user_msg=user_msg,
+                    ai_response=response,
+                )
+                self._save_ai_thought(thought, user_jid=user_jid,
+                                      bot_id=bot_id or "", message_id=chat_msg_id)
+
+            return AIResult(response=response, thought=thought)
         
         except Exception as e:
             # Catch-all for unexpected errors
             logger.error(f"Unexpected error processing message {msg_id}: {e}", exc_info=True)
             return None
     
+    # ─────────────────────────────────────── Phase 2 helpers ─────────────────
+
+    _STOP_WORDS = {
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "shall",
+        "should", "may", "might", "must", "can", "could", "i", "you", "he",
+        "she", "it", "we", "they", "me", "him", "her", "us", "them", "my",
+        "your", "his", "our", "their", "this", "that", "these", "those",
+        "what", "which", "who", "how", "when", "where", "why", "and", "or",
+        "but", "not", "no", "so", "if", "in", "on", "at", "to", "for",
+        "of", "with", "about", "by", "from",
+    }
+
+    def _build_thought(self, user_msg: str, response: str,
+                       strategy_info: dict = None) -> "AIThought":
+        """
+        Build a lightweight AIThought from user message + AI response.
+        Uses simple heuristics — no extra LLM call required.
+        """
+        from app.ai_module.models import AIThought
+
+        # ── Intent detection (rule-based) ─────────────────────────────────
+        msg_lower = user_msg.lower().strip()
+        if "?" in user_msg or msg_lower.startswith(("what", "how", "why", "when", "where", "who")):
+            intent = "question"
+        elif any(w in msg_lower for w in ("hello", "hi", "hey", "good morning", "good evening")):
+            intent = "greeting"
+        elif any(w in msg_lower for w in ("help", "assist", "support", "problem", "issue", "error")):
+            intent = "support"
+        elif any(w in msg_lower for w in ("buy", "price", "cost", "purchase", "order")):
+            intent = "purchase_intent"
+        else:
+            intent = "statement"
+
+        # ── Keyword extraction ────────────────────────────────────────────
+        words = re.findall(r"[a-zA-Z\u4e00-\u9fff]+", user_msg)
+        keywords: List[str] = []
+        seen: set = set()
+        for w in words:
+            wl = w.lower()
+            if len(wl) >= 3 and wl not in self._STOP_WORDS and wl not in seen:
+                keywords.append(w)
+                seen.add(wl)
+            if len(keywords) >= 10:
+                break
+
+        # ── Response quality score ────────────────────────────────────────
+        resp_len = len(response.strip())
+        if 30 <= resp_len <= 600:
+            quality = 0.9
+        elif resp_len < 10:
+            quality = 0.2
+        elif resp_len > 1200:
+            quality = 0.6
+        else:
+            quality = 0.75
+
+        # ── Tone detection (based on response content) ────────────────────
+        resp_lower = response.lower()
+        if any(w in resp_lower for w in ("sorry", "apologize", "unfortunately")):
+            tone = "empathetic"
+        elif any(w in resp_lower for w in ("!", "great", "excellent", "wonderful")):
+            tone = "friendly"
+        elif resp_len > 300:
+            tone = "detailed"
+        else:
+            tone = "concise"
+
+        # ── Strategy fields ───────────────────────────────────────────────
+        if strategy_info:
+            strat_parts = [f"{k}={v}" for k, v in strategy_info.items() if v]
+            strategy_selected = ",".join(strat_parts) if strat_parts else "default"
+            strategy_reasoning = f"Applied user strategy: {strategy_selected}"
+        else:
+            strategy_selected = "default"
+            strategy_reasoning = "No specialized strategy applied"
+
+        return AIThought(
+            intent=intent,
+            confidence=0.7,
+            detected_keywords=keywords,
+            strategy_selected=strategy_selected,
+            strategy_reasoning=strategy_reasoning,
+            tone=tone,
+            response_quality_score=quality,
+            raw_thought=response,
+        )
+
+    def _save_chat_messages_to_dashboard(
+        self,
+        user_jid: str,
+        bot_id: str,
+        user_msg: str,
+        ai_response: str,
+    ) -> Optional[int]:
+        """
+        Write only the AI reply (direction='out') to dashboard chat_messages.
+        The incoming user message is already persisted by zowbot_layer directly.
+
+        Returns the rowid of the AI response row (used as FK for ai_thoughts),
+        or None on failure.
+        """
+        ts = int(time.time())
+        try:
+            conn = sqlite3.connect(self.dashboard_db_path, timeout=5)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                # Find the most recent 'in' row for this user to use as the message_id FK
+                in_row = conn.execute(
+                    "SELECT id FROM chat_messages "
+                    "WHERE user_jid = ? AND direction = 'in' "
+                    "ORDER BY id DESC LIMIT 1",
+                    (user_jid,),
+                ).fetchone()
+                in_row_id = in_row["id"] if in_row else None
+                # Save the AI (out) response
+                conn.execute(
+                    """
+                    INSERT INTO chat_messages
+                        (user_jid, direction, content, message_type, timestamp)
+                    VALUES (?, 'out', ?, 'text', ?)
+                    """,
+                    (user_jid, ai_response, ts),
+                )
+                conn.commit()
+                return in_row_id
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning(f"Dashboard chat_messages write failed: {e}")
+            return None
+
+    def _save_ai_thought(
+        self,
+        thought: "AIThought",
+        user_jid: str,
+        bot_id: str,
+        message_id: Optional[int],
+    ) -> None:
+        """
+        Persist AIThought to the dashboard ai_thoughts table.
+        Fire-and-forget — never raises, never crashes the caller.
+        """
+        try:
+            row = thought.to_db_row()
+            conn = sqlite3.connect(self.dashboard_db_path, timeout=5)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute(
+                    """
+                    INSERT INTO ai_thoughts
+                        (message_id, user_jid,
+                         intent, confidence, detected_keywords,
+                         strategy_selected, strategy_reasoning,
+                         tone, response_quality_score, raw_thought)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        message_id,
+                        user_jid,
+                        row["intent"],
+                        row["confidence"],
+                        row["detected_keywords"],
+                        row["strategy_selected"],
+                        row["strategy_reasoning"],
+                        row["tone"],
+                        row["response_quality_score"],
+                        row["raw_thought"],
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning(f"Dashboard ai_thoughts write failed: {e}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def get_status(self) -> Dict:
         """
         Get AI service status information.

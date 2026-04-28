@@ -29,15 +29,40 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # ---------------------------------------------------------------------------
+# Load .env file (if present) BEFORE reading any env vars.
+# The file is optional — production deployments may prefer injecting
+# environment variables directly via the process supervisor / container.
+# ---------------------------------------------------------------------------
+try:
+    from dotenv import load_dotenv
+    _env_file = PROJECT_ROOT / ".env"
+    if _env_file.exists():
+        load_dotenv(_env_file, override=False)  # don't override vars already set
+except ImportError:
+    pass  # python-dotenv not installed — rely on environment variables
+
+# ---------------------------------------------------------------------------
 # Logging setup (before importing anything that logs)
 # ---------------------------------------------------------------------------
-log_level = logging.DEBUG if os.environ.get("DASHBOARD_DEBUG", "").lower() == "true" else logging.INFO
+_log_level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
+if os.environ.get("DASHBOARD_DEBUG", "").lower() == "true":
+    _log_level = logging.DEBUG
 logging.basicConfig(
-    level=log_level,
+    level=_log_level,
     format="%(asctime)s %(levelname)-8s %(name)s  %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("dashboard")
+
+# ---------------------------------------------------------------------------
+# Add rotating file handler (writes to logs/dashboard.log)
+# ---------------------------------------------------------------------------
+try:
+    from app.dashboard.utils.logging_setup import setup_dashboard_logging
+    setup_dashboard_logging()
+except Exception:
+    pass  # logging to file is best-effort; never crash at startup
 
 # ---------------------------------------------------------------------------
 # Import app factory (deferred so logging is set up first)
@@ -56,6 +81,12 @@ if __name__ == "__main__":
     logger.info(f"Starting Dashboard server on http://{host}:{port}  debug={debug}")
     logger.info(f"Dashboard DB: {CONFIG['DASHBOARD_DB_PATH']}")
 
-    # Standard Werkzeug WSGI server.
-    # DO NOT replace with socketio.run() or use_reloader with eventlet/gevent.
-    app.run(host=host, port=port, debug=debug, use_reloader=debug)
+    # Use socketio.run() when Flask-SocketIO is active (supports WS upgrades).
+    # Falls back to standard app.run() when SocketIO is not configured.
+    sio = app.extensions.get("socketio")
+    if sio is not None:
+        logger.info("WebSocket support enabled (async_mode=threading)")
+        sio.run(app, host=host, port=port, debug=debug, use_reloader=debug,
+                allow_unsafe_werkzeug=True)
+    else:
+        app.run(host=host, port=port, debug=debug, use_reloader=debug)

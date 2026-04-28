@@ -17,3 +17,6 @@ node_modules
 .venv
 *.log
 logs/
+.env
+data/dashboard.db
+data/*.db

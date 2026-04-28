@@ -127,11 +127,19 @@ CREATE TABLE IF NOT EXISTS daily_statistics (
 _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_messages_user     ON chat_messages(user_jid)",
     "CREATE INDEX IF NOT EXISTS idx_messages_ts       ON chat_messages(timestamp)",
+    # Phase 6: composite index for paginated per-user message queries
+    "CREATE INDEX IF NOT EXISTS idx_messages_user_ts  ON chat_messages(user_jid, timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_thoughts_user     ON ai_thoughts(user_jid)",
     "CREATE INDEX IF NOT EXISTS idx_thoughts_msg      ON ai_thoughts(message_id)",
+    # Phase 6: composite index for per-user thoughts ordered by time
+    "CREATE INDEX IF NOT EXISTS idx_thoughts_user_ts  ON ai_thoughts(user_jid, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_strategy_user     ON strategy_applications(user_jid)",
     "CREATE INDEX IF NOT EXISTS idx_strategy_active   ON strategy_applications(is_active)",
+    # Phase 6: composite for fetching the active strategy for a given user
+    "CREATE INDEX IF NOT EXISTS idx_strategy_user_active ON strategy_applications(user_jid, is_active, applied_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_conflicts_user    ON strategy_conflicts(user_jid)",
+    # Phase 6: composite for unresolved conflicts per user
+    "CREATE INDEX IF NOT EXISTS idx_conflicts_user_resolved ON strategy_conflicts(user_jid, resolved)",
     "CREATE INDEX IF NOT EXISTS idx_daily_date        ON daily_statistics(date)",
 ]
 
@@ -196,6 +204,8 @@ def get_db_connection(db_path: str = DB_PATH):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # Phase 6 — let SQLite update query-planner statistics periodically
+    conn.execute("PRAGMA optimize=0x10002")
     try:
         yield conn
     finally:

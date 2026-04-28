@@ -1,0 +1,497 @@
+openapi: "3.0.3"
+info:
+  title: Zowsup Dashboard API
+  version: "1.0.0"
+  description: |
+    REST API for the Zowsup Dashboard.  All endpoints (except `/api/health`)
+    require Bearer-token authentication.
+
+    **Authentication**
+
+    Include the token in every request:
+    ```
+    Authorization: Bearer <DASHBOARD_API_TOKEN>
+    ```
+
+    Set `DASHBOARD_API_TOKEN` in your `.env` file or environment.
+
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "jid is required"
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, error]
+        journal_mode:
+          type: string
+          example: wal
+        tables:
+          type: object
+          additionalProperties:
+            type: string
+
+    UserProfile:
+      type: object
+      properties:
+        jid:
+          type: string
+          example: "8613800001234@s.whatsapp.net"
+        display_name:
+          type: string
+        language:
+          type: string
+        sentiment_score:
+          type: number
+          format: float
+        topic_tags:
+          type: array
+          items:
+            type: string
+        risk_level:
+          type: string
+          enum: [low, medium, high]
+        last_active:
+          type: string
+          format: date-time
+
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_jid:
+          type: string
+        message:
+          type: string
+        direction:
+          type: string
+          enum: [in, out]
+        timestamp:
+          type: string
+          format: date-time
+
+    ChatHistoryResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        total:
+          type: integer
+        page:
+          type: integer
+        per_page:
+          type: integer
+
+    Statistics:
+      type: object
+      properties:
+        total_users:
+          type: integer
+        active_users_7d:
+          type: integer
+        total_messages:
+          type: integer
+        messages_today:
+          type: integer
+        daily_counts:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              count:
+                type: integer
+
+    AIThought:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_jid:
+          type: string
+        thought:
+          type: string
+        model:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Strategy:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_jid:
+          type: string
+        strategy_name:
+          type: string
+        strategy_params:
+          type: object
+        is_active:
+          type: boolean
+        applied_at:
+          type: string
+          format: date-time
+
+    TokenVerifyResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        auth_configured:
+          type: boolean
+
+    TokenRefreshResponse:
+      type: object
+      properties:
+        new_token:
+          type: string
+          example: "a3f9b2c1d4e5..."
+        instructions:
+          type: string
+
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      description: Returns DB status. No authentication required.
+      security: []
+      tags: [System]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/user-profile:
+    get:
+      summary: Get user portrait
+      description: Returns the computed AI portrait for a given WhatsApp JID.
+      tags: [Users]
+      parameters:
+        - name: jid
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "8613800001234@s.whatsapp.net"
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "400":
+          description: Missing or invalid jid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized
+
+  /api/chat-history:
+    get:
+      summary: Get paginated chat history
+      tags: [Chats]
+      parameters:
+        - name: jid
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "8613800001234@s.whatsapp.net"
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 500
+      responses:
+        "200":
+          description: Paginated messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatHistoryResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized
+
+  /api/statistics:
+    get:
+      summary: Get aggregated statistics
+      tags: [Analytics]
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 7
+            maximum: 90
+          description: Number of days to include in daily_counts
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Statistics"
+        "400":
+          description: Invalid days parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Unauthorized
+
+  /api/user-ai-thoughts:
+    get:
+      summary: Get AI analysis thoughts for a user
+      tags: [Users]
+      parameters:
+        - name: jid
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: AI thoughts list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  thoughts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AIThought"
+                  total:
+                    type: integer
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+
+  /api/apply-strategy:
+    post:
+      summary: Apply a strategy to a specific user
+      tags: [Strategy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jid, strategy_name]
+              properties:
+                jid:
+                  type: string
+                strategy_name:
+                  type: string
+                strategy_params:
+                  type: object
+      responses:
+        "200":
+          description: Strategy applied
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+
+  /api/apply-global-strategy:
+    post:
+      summary: Apply a strategy to all active users
+      tags: [Strategy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [strategy_name]
+              properties:
+                strategy_name:
+                  type: string
+                strategy_params:
+                  type: object
+      responses:
+        "200":
+          description: Strategy applied to all users
+        "401":
+          description: Unauthorized
+
+  /api/strategy:
+    get:
+      summary: Get active strategies
+      tags: [Strategy]
+      parameters:
+        - name: jid
+          in: query
+          schema:
+            type: string
+          description: Filter by user JID (optional)
+      responses:
+        "200":
+          description: Strategy list
+        "401":
+          description: Unauthorized
+
+  /api/strategy/history:
+    get:
+      summary: Get strategy application history
+      tags: [Strategy]
+      parameters:
+        - name: jid
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Strategy history
+        "401":
+          description: Unauthorized
+
+  /api/strategy/rollback:
+    post:
+      summary: Roll back a strategy application
+      tags: [Strategy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [application_id]
+              properties:
+                application_id:
+                  type: integer
+      responses:
+        "200":
+          description: Rollback successful
+        "401":
+          description: Unauthorized
+
+  /api/strategy/conflicts:
+    get:
+      summary: Get strategy conflicts
+      tags: [Strategy]
+      parameters:
+        - name: jid
+          in: query
+          schema:
+            type: string
+        - name: resolved
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Conflicts list
+        "401":
+          description: Unauthorized
+
+  /api/auth/verify:
+    get:
+      summary: Verify current API token
+      tags: [Auth]
+      responses:
+        "200":
+          description: Token status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenVerifyResponse"
+        "401":
+          description: Token is invalid
+
+  /api/auth/refresh:
+    post:
+      summary: Generate a new API token
+      description: |
+        Generates a new random token.  The operator must restart the server
+        with the new token set as `DASHBOARD_API_TOKEN`.
+      tags: [Auth]
+      responses:
+        "200":
+          description: New token generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenRefreshResponse"
+        "401":
+          description: Unauthorized
+
+tags:
+  - name: System
+    description: Health and status endpoints
+  - name: Users
+    description: User profile and AI analysis
+  - name: Chats
+    description: Chat message history
+  - name: Analytics
+    description: Aggregated statistics
+  - name: Strategy
+    description: AI response strategy management
+  - name: Auth
+    description: API token management

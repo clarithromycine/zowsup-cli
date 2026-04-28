@@ -32,7 +32,7 @@ class Cmd_Ai_Test(BotCommand):
                 logger.info(f"AI test succeeded: {test_response}")
                 return self.success(
                     test_message="你好",
-                    response=test_response,
+                    response=test_response.response,
                     backend=ai_service.backend.get_status()
                 )
             else:

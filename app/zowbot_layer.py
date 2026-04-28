@@ -142,6 +142,8 @@ class ZowBotLayer(YowInterfaceLayer):
         
         # AI auto-reply service (Phase 1: Mock mode)
         self.ai_service = None
+        # Dashboard DB path — set once CONFIG is loaded; used for direct message persistence
+        self._dashboard_db_path: "str | None" = None
 
     async def _sendIqAsync(self, entity):
         """
@@ -873,12 +875,30 @@ class ZowBotLayer(YowInterfaceLayer):
                 if not ai_config.get('ai_llm_active', {}).get('enabled', True):
                     self.logger.debug("🔇 AI module disabled in config")
                     self.ai_service = None
+                    # Still wire up dashboard DB path so messages are persisted
+                    try:
+                        from app.dashboard.config import CONFIG as DASHBOARD_CONFIG
+                        self._dashboard_db_path = DASHBOARD_CONFIG.get("DASHBOARD_DB_PATH")
+                    except Exception:
+                        pass
                     return
                 
                 self.ai_service = AIService(
                     db_path=str(db_file),
-                    config=ai_config                    
+                    config=ai_config
                 )
+                # Phase 2: Wire up dashboard db for AI thought recording
+                try:
+                    from app.dashboard.config import CONFIG as DASHBOARD_CONFIG
+                    _db_path = DASHBOARD_CONFIG.get("DASHBOARD_DB_PATH")
+                    self.ai_service.dashboard_db_path = _db_path
+                    self._dashboard_db_path = _db_path  # also set on layer for direct saves
+                    # Phase 3: Wire up strategy manager
+                    if _db_path:
+                        from app.dashboard.strategy.strategy_manager import StrategyManager
+                        self.ai_service.strategy_manager = StrategyManager(_db_path)
+                except Exception:
+                    pass  # Dashboard not configured — analytics silently disabled
                 
                 # Set up send response callback for retry manager
                 self.ai_service.set_send_response_callback(self._ai_send_response)
@@ -1065,7 +1085,38 @@ class ZowBotLayer(YowInterfaceLayer):
             
         except Exception as send_err:
             self.logger.error(f"Failed to send AI retry response to {user_jid}: {send_err}", exc_info=True)
-    
+
+    # ── Dashboard direct persistence ────────────────────────────────────────
+
+    def _save_msg_to_dashboard(
+        self, user_jid: str, direction: str, content: str, message_type: str = "text"
+    ) -> None:
+        """
+        Write a single chat message row to dashboard.db.
+        Fire-and-forget — never raises, never crashes the caller.
+        Called for every incoming/outgoing text message, independent of AI.
+        """
+        db_path = self._dashboard_db_path
+        if not db_path or not content:
+            return
+        try:
+            import sqlite3 as _sqlite3
+            import time as _time
+            conn = _sqlite3.connect(db_path, timeout=5)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute(
+                    "INSERT INTO chat_messages "
+                    "(user_jid, direction, content, message_type, timestamp) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (user_jid, direction, content, message_type, int(_time.time())),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            self.logger.warning(f"dashboard direct save failed: {exc}")
+
     def _parse_jid_and_lid(self, messageProtocolEntity):
         """
         Parse and extract JID and LID from messageProtocolEntity.
@@ -1196,18 +1247,24 @@ class ZowBotLayer(YowInterfaceLayer):
             "raw":base64.b64encode(messageProtocolEntity.raw)
         })
 
+        # Persist to dashboard.db for every text message, independent of AI
+        if text and self._dashboard_db_path:
+            direction = "out" if messageProtocolEntity.fromme else "in"
+            self._save_msg_to_dashboard(jid, direction, text)
+
         # Send message acks with probabilistic behavior
         await self._async_send_message_acks(messageProtocolEntity)        
         
         # AI auto-reply processing (Phase 1.5: real API mode with message sending)
         if self.ai_service:
             try:
-                ai_response = await self.ai_service.process_message(
+                ai_result = await self.ai_service.process_message(
                     messageProtocolEntity,
                     user_jid=jid,
                     bot_id=self.bot.botId
                 )
-                if ai_response:
+                if ai_result:
+                    ai_response = ai_result.response
                     self.logger.info(f"AI response ready : {ai_response[:100]}")
                     
                     # Send AI response back to sender

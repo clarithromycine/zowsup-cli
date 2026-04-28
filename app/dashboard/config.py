@@ -24,17 +24,31 @@ def _load_config() -> dict:
 
     account_path = conf.get("SysVar", "ACCOUNT_PATH", fallback="/data/account/")
 
+    default_db = str(project_root / "data" / "dashboard.db")
+    default_log_dir = str(project_root / "logs")
+
     return {
         "PROJECT_ROOT": str(project_root),
         "ACCOUNT_PATH": account_path,
         # dashboard.db lives inside the project's data/ folder, completely
         # separate from any per-account db.db
-        "DASHBOARD_DB_PATH": str(project_root / "data" / "dashboard.db"),
+        "DASHBOARD_DB_PATH": os.environ.get("DASHBOARD_DB_PATH", default_db),
         "FLASK_HOST": os.environ.get("DASHBOARD_HOST", "0.0.0.0"),
         "FLASK_PORT": int(os.environ.get("DASHBOARD_PORT", "5000")),
         "FLASK_DEBUG": os.environ.get("DASHBOARD_DEBUG", "false").lower() == "true",
-        # Simple bearer token for API auth (Phase 5 will enforce this)
+        # Simple bearer token for API auth
         "API_TOKEN": os.environ.get("DASHBOARD_API_TOKEN", ""),
+        # CORS allowed origins (comma-separated)
+        "CORS_ORIGINS": [
+            o.strip()
+            for o in os.environ.get("CORS_ORIGINS", "*").split(",")
+            if o.strip()
+        ],
+        # Logging
+        "LOG_LEVEL": os.environ.get("LOG_LEVEL", "INFO").upper(),
+        "LOG_DIR": os.environ.get("LOG_DIR", default_log_dir),
+        "LOG_MAX_BYTES": int(os.environ.get("LOG_MAX_BYTES", str(10 * 1024 * 1024))),
+        "LOG_BACKUP_COUNT": int(os.environ.get("LOG_BACKUP_COUNT", "5")),
     }
 
 

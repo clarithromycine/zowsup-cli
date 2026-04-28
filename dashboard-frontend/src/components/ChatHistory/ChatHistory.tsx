@@ -1,0 +1,151 @@
+import React, { useEffect, useRef } from 'react'
+import { Typography, Tag, Spin, Empty, Pagination, Tooltip } from 'antd'
+import { RobotOutlined, UserOutlined } from '@ant-design/icons'
+import dayjs from 'dayjs'
+import { fetchChatHistory } from '../../api/endpoints'
+import { useDashboardStore } from '../../store'
+import type { ChatMessage } from '../../types'
+
+const { Text } = Typography
+
+function SourceTag({ direction }: { direction: 'in' | 'out' }) {
+  return direction === 'out' ? (
+    <Tag color="green" icon={<RobotOutlined />} style={{ margin: 0, fontSize: 11 }}>AI</Tag>
+  ) : (
+    <Tag icon={<UserOutlined />} style={{ margin: 0, fontSize: 11, color: '#888', borderColor: '#d9d9d9', background: '#fafafa' }}>用户</Tag>
+  )
+}
+
+function MessageItem({ msg }: { msg: ChatMessage }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: msg.direction === 'out' ? 'row-reverse' : 'row',
+        gap: 8,
+        marginBottom: 12,
+        alignItems: 'flex-start',
+      }}
+    >
+      <div
+        style={{
+          maxWidth: '75%',
+          background: msg.direction === 'out' ? '#d9f7be' : '#fff',
+          border: '1px solid #f0f0f0',
+          borderRadius: 8,
+          padding: '6px 10px',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+        }}
+      >
+        <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {msg.content}
+        </Text>
+        <div style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
+          <SourceTag direction={msg.direction} />
+          <Tooltip title={dayjs.unix(msg.timestamp).format('YYYY-MM-DD HH:mm:ss')}>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {dayjs.unix(msg.timestamp).format('HH:mm')}
+            </Text>
+          </Tooltip>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const PAGE_SIZE = 50
+
+const ChatHistory: React.FC = () => {
+  const selectedJid = useDashboardStore((s) => s.selectedJid)
+  const messages = useDashboardStore((s) => s.messages)
+  const messagesPage = useDashboardStore((s) => s.messagesPage)
+  const messagesTotal = useDashboardStore((s) => s.messagesTotal)
+  const messagesLoading = useDashboardStore((s) => s.messagesLoading)
+  const setMessages = useDashboardStore((s) => s.setMessages)
+  const setMessagesLoading = useDashboardStore((s) => s.setMessagesLoading)
+  // Ref to the inverted scroll container — used to jump to visual-bottom (DOM scrollTop=0)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Jump to newest messages (visual bottom = DOM top = scrollTop 0) on contact switch
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+  }, [selectedJid])
+
+  async function handlePageChange(page: number) {
+    if (!selectedJid) return
+    setMessagesLoading(true)
+    try {
+      const res = await fetchChatHistory(selectedJid, page, PAGE_SIZE)
+      setMessages(res.messages, res.page, res.total)
+      // Jump to the newest end of the newly loaded page (instant, no animation jank)
+      if (scrollRef.current) scrollRef.current.scrollTop = 0
+    } catch {
+      // keep existing
+    } finally {
+      setMessagesLoading(false)
+    }
+  }
+
+  if (!selectedJid) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+        <Empty description="请选择一个联系人查看聊天记录" />
+      </div>
+    )
+  }
+
+  if (messagesLoading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+        <Spin tip="加载中..." />
+      </div>
+    )
+  }
+
+  if (messages.length === 0) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+        <Empty description="暂无聊天记录" />
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/*
+        Inverted-list technique:
+        1. The scroll container is flipped with scaleY(-1):
+           - DOM top  → visual bottom  (newest messages always anchor here)
+           - DOM bottom → visual top   (oldest messages scroll up to)
+           - scrollTop=0 naturally shows the newest messages without any scrollIntoView call
+        2. Each message item is flipped back with scaleY(-1) so text reads normally.
+        3. Messages are rendered in store order (newest-first, index 0 at DOM top)
+           so they appear oldest→newest top→bottom after the double-flip.
+        Result: no scroll-jump on message load or live push.
+      */}
+      <div
+        ref={scrollRef}
+        style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', transform: 'scaleY(-1)' }}
+      >
+        {messages.map((msg) => (
+          <div key={msg.id} style={{ transform: 'scaleY(-1)' }}>
+            <MessageItem msg={msg} />
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: '8px 16px', borderTop: '1px solid #f0f0f0', textAlign: 'right' }}>
+        <Pagination
+          current={messagesPage}
+          pageSize={PAGE_SIZE}
+          total={messagesTotal}
+          onChange={handlePageChange}
+          size="small"
+          showTotal={(t) => `共 ${t} 条`}
+          showSizeChanger={false}
+        />
+      </div>
+    </div>
+  )
+}
+
+export default ChatHistory
