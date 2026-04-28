@@ -1,7 +1,7 @@
 
 ---
 
-# Zowsup-CLI: Advanced WhatsApp Protocol CLI Client
+# Zowsup-CLI: Advanced WhatsApp Protocol Client
 
 **A comprehensive restructuring of [Zowsup](https://github.com/clarithromycine/zowsup/) with full-stack async architecture, enhanced prompt engineering, and integrated AI capabilities.**
 
@@ -223,7 +223,7 @@ The integrated AI module provides:
 - **Efficient resource utilization** - minimal memory footprint
 - **Graceful error recovery** with async context management
 
-## 📦 Project Structure
+## 📦 Core Project Structure
 
 ```
 zowsup-cli/
@@ -235,10 +235,6 @@ zowsup-cli/
 │   ├── layers/         # Protocol stack layers
 │   ├── stacks/         # Multi-device stacks
 │   └── registration/   # Account registration
-├── consonance/         # Noise protocol (async-native)
-├── axolotl/            # End-to-end encryption
-├── zargo/              # Argo data codec
-├── zwam/               # WAM encoding/decoding
 ├── proto/              # Protobuf definitions
 ├── script/             # CLI entry points
 ├── conf/               # Configuration files
