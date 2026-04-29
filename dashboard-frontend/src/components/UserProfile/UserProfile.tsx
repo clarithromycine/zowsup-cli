@@ -46,24 +46,11 @@ import {
   deleteStrategyRow,
 } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
+import { useTranslation } from 'react-i18next'
 import type { StrategyConfig, StrategyRecord } from '../../types'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
-
-const CATEGORY_OPTIONS = [
-  { label: 'VIP', value: 'VIP' },
-  { label: '普通', value: 'regular' },
-  { label: '新用户', value: 'new' },
-  { label: '流失风险', value: 'at_risk' },
-]
-
-const COMM_STYLE_OPTIONS = [
-  { label: '详细', value: 'detailed' },
-  { label: '简洁', value: 'concise' },
-  { label: '耐心', value: 'patient' },
-  { label: '急躁', value: 'impatient' },
-]
 
 const CATEGORY_COLOR: Record<string, string> = {
   VIP: 'gold',
@@ -79,7 +66,6 @@ const STYLE_COLOR: Record<string, string> = {
   impatient: 'orange',
 }
 
-/** Inline editable tag: shows tag + pencil; on click shows a Select + confirm */
 function InlineTagEditor({
   value,
   isManual,
@@ -95,6 +81,7 @@ function InlineTagEditor({
   defaultColor: string
   onSave: (v: string | null) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [pending, setPending] = useState<string | null>(value)
   const [saving, setSaving] = useState(false)
@@ -121,7 +108,7 @@ function InlineTagEditor({
           value={pending}
           options={options}
           allowClear
-          placeholder="自动推断"
+          placeholder={t('userProfile.autoInfer')}
           onChange={(v) => setPending(v ?? null)}
           autoFocus
         />
@@ -145,11 +132,11 @@ function InlineTagEditor({
     <Space size={4}>
       <Tag color={tagColor} style={{ margin: 0 }}>{labelText}</Tag>
       {isManual && (
-        <Tooltip title="已手动设置（优先于自动推断）">
-          <Tag color="volcano" style={{ margin: 0, fontSize: 10, padding: '0 4px' }}>手动</Tag>
+        <Tooltip title={t('userProfile.manualHint')}>
+          <Tag color="volcano" style={{ margin: 0, fontSize: 10, padding: '0 4px' }}>{t('userProfile.manual')}</Tag>
         </Tooltip>
       )}
-      <Tooltip title="手动设置">
+      <Tooltip title={t('userProfile.setManually')}>
         <Button
           type="text"
           size="small"
@@ -162,26 +149,14 @@ function InlineTagEditor({
   )
 }
 
-const STYLE_OPTIONS = [
-  { label: '正式', value: 'formal' },
-  { label: '随意', value: 'casual' },
-  { label: '简洁', value: 'concise' },
-  { label: '详细', value: 'detailed' },
+const STYLE_OPTIONS_STATIC = [
+  { value: 'formal' }, { value: 'casual' }, { value: 'concise' }, { value: 'detailed' },
 ]
-
-const TONE_OPTIONS = [
-  { label: '礼貌', value: 'polite' },
-  { label: '友好', value: 'friendly' },
-  { label: '专业', value: 'professional' },
-  { label: '同理心', value: 'empathetic' },
-  { label: '中性', value: 'neutral' },
+const TONE_OPTIONS_STATIC = [
+  { value: 'polite' }, { value: 'friendly' }, { value: 'professional' }, { value: 'empathetic' }, { value: 'neutral' },
 ]
-
-const LANG_OPTIONS = [
-  { label: '自动', value: 'auto' },
-  { label: '中文', value: 'zh' },
-  { label: '英文', value: 'en' },
-  { label: '混合', value: 'mixed' },
+const LANG_OPTIONS_STATIC = [
+  { value: 'auto' }, { value: 'zh' }, { value: 'en' }, { value: 'mixed' },
 ]
 
 function TrendIndicator({ direction, pct }: { direction: string; pct?: number | null }) {
@@ -194,11 +169,31 @@ function TrendIndicator({ direction, pct }: { direction: string; pct?: number | 
 }
 
 const UserProfile: React.FC = () => {
+  const { t } = useTranslation()
   const selectedJid = useDashboardStore((s) => s.selectedJid)
   const profile = useDashboardStore((s) => s.profile)
   const profileLoading = useDashboardStore((s) => s.profileLoading)
   const setProfile = useDashboardStore((s) => s.setProfile)
   const setProfileLoading = useDashboardStore((s) => s.setProfileLoading)
+
+  // Translated option arrays (react to lang change)
+  const CATEGORY_OPTIONS = [
+    { label: 'VIP', value: 'VIP' },
+    { label: t('categoryOpts.regular'), value: 'regular' },
+    { label: t('categoryOpts.new'), value: 'new' },
+    { label: t('categoryOpts.at_risk'), value: 'at_risk' },
+  ]
+
+  const COMM_STYLE_OPTIONS = [
+    { label: t('commStyleOpts.detailed'), value: 'detailed' },
+    { label: t('commStyleOpts.concise'), value: 'concise' },
+    { label: t('commStyleOpts.patient'), value: 'patient' },
+    { label: t('commStyleOpts.impatient'), value: 'impatient' },
+  ]
+
+  const STYLE_OPTIONS = STYLE_OPTIONS_STATIC.map((o) => ({ ...o, label: t(`strategyOpts.${o.value}`) }))
+  const TONE_OPTIONS = TONE_OPTIONS_STATIC.map((o) => ({ ...o, label: t(`strategyOpts.${o.value}`) }))
+  const LANG_OPTIONS = LANG_OPTIONS_STATIC.map((o) => ({ ...o, label: t(`strategyOpts.${o.value}`) }))
 
   const [modalOpen, setModalOpen] = useState(false)
   const [applying, setApplying] = useState(false)
@@ -239,7 +234,7 @@ const UserProfile: React.FC = () => {
       const { note, ...config } = values
       setApplying(true)
       await postApplyStrategy(selectedJid, config as StrategyConfig, note)
-      message.success('策略已应用，下一条 AI 回复立即生效')
+      message.success(t('userProfile.strategyApplied'))
       setModalOpen(false)
       fetchUserProfile(selectedJid).then(setProfile).catch(() => null)
       loadPersonalHistory(selectedJid)
@@ -255,11 +250,11 @@ const UserProfile: React.FC = () => {
     setRolling(true)
     try {
       await postRollbackStrategy(selectedJid)
-      message.success('已回滚到上一版本策略')
+      message.success(t('userProfile.strategyRolledBack'))
       fetchUserProfile(selectedJid).then(setProfile).catch(() => null)
       loadPersonalHistory(selectedJid)
     } catch {
-      message.error('回滚失败')
+      message.error(t('userProfile.rollbackFailed'))
     } finally {
       setRolling(false)
     }
@@ -276,9 +271,9 @@ const UserProfile: React.FC = () => {
           return r
         }),
       )
-      message.success(result.is_active ? '策略已启用' : '策略已屏蔽')
+      message.success(result.is_active ? t('userProfile.enabledStrategy') : t('userProfile.blockedStrategy'))
     } catch {
-      message.error('操作失败')
+      message.error(t('userProfile.actionFailed'))
     } finally {
       setRowLoading((prev) => ({ ...prev, [record.id]: false }))
     }
@@ -289,9 +284,9 @@ const UserProfile: React.FC = () => {
     try {
       await deleteStrategyRow(record.id)
       setPersonalHistory((prev) => prev.filter((r) => r.id !== record.id))
-      message.success('已删除')
+      message.success(t('userProfile.deleted'))
     } catch {
-      message.error('删除失败')
+      message.error(t('userProfile.deleteFailed'))
     } finally {
       setRowLoading((prev) => ({ ...prev, [record.id]: false }))
     }
@@ -299,7 +294,7 @@ const UserProfile: React.FC = () => {
 
   const historyColumns = [
     {
-      title: '版本',
+      title: t('common.version'),
       dataIndex: 'version',
       width: 52,
       render: (v: number, r: StrategyRecord) => (
@@ -307,30 +302,30 @@ const UserProfile: React.FC = () => {
       ),
     },
     {
-      title: '状态',
+      title: t('common.status'),
       dataIndex: 'is_active',
       width: 68,
       render: (active: 0 | 1) =>
         active ? (
-          <Tag color="green" icon={<CheckCircleOutlined />} style={{ margin: 0, fontSize: 11 }}>激活</Tag>
+          <Tag color="green" icon={<CheckCircleOutlined />} style={{ margin: 0, fontSize: 11 }}>{t('userProfile.activated')}</Tag>
         ) : (
-          <Tag color="default" icon={<StopOutlined />} style={{ margin: 0, fontSize: 11 }}>屏蔽</Tag>
+          <Tag color="default" icon={<StopOutlined />} style={{ margin: 0, fontSize: 11 }}>{t('userProfile.inactive')}</Tag>
         ),
     },
     {
-      title: '备注',
+      title: t('common.remark'),
       dataIndex: 'note',
       ellipsis: true,
       render: (n: string | null) => <span style={{ fontSize: 12 }}>{n ?? '—'}</span>,
     },
     {
-      title: '时间',
+      title: t('common.time'),
       dataIndex: 'applied_at',
       width: 80,
-      render: (t: string) => <span style={{ fontSize: 11 }}>{dayjs(t).format('MM-DD HH:mm')}</span>,
+      render: (ts: string) => <span style={{ fontSize: 11 }}>{dayjs(ts).format('MM-DD HH:mm')}</span>,
     },
     {
-      title: '操作',
+      title: t('common.actions'),
       width: 88,
       fixed: 'right' as const,
       render: (_: unknown, record: StrategyRecord) => (
@@ -340,15 +335,15 @@ const UserProfile: React.FC = () => {
             loading={rowLoading[record.id]}
             icon={record.is_active ? <StopOutlined /> : <CheckCircleOutlined />}
             onClick={() => handleToggleRow(record)}
-            title={record.is_active ? '屏蔽此策略' : '启用此策略'}
+            title={record.is_active ? t('userProfile.blockStrategy') : t('userProfile.enableStrategy')}
           />
           <Popconfirm
-            title="删除策略"
-            description="此操作不可撤销，确定删除？"
+            title={t('userProfile.deleteStrategy')}
+            description={t('userProfile.deleteStrategyDesc')}
             onConfirm={() => handleDeleteRow(record)}
-            okText="删除"
+            okText={t('common.delete')}
             okButtonProps={{ danger: true }}
-            cancelText="取消"
+            cancelText={t('common.cancel')}
           >
             <Button
               size="small"
@@ -365,20 +360,20 @@ const UserProfile: React.FC = () => {
   const handleSaveCategory = async (val: string | null) => {
     if (!selectedJid) return
     await patchUserProfile(selectedJid, { user_category: val })
-    message.success(val ? `用户分类已设置为 ${val}` : '已清除手动分类（恢复自动推断）')
+    message.success(val ? t('userProfile.categorySaved', { val }) : t('userProfile.categoryClear'))
     fetchUserProfile(selectedJid).then(setProfile).catch(() => null)
   }
 
   const handleSaveStyle = async (val: string | null) => {
     if (!selectedJid) return
     await patchUserProfile(selectedJid, { communication_style: val })
-    message.success(val ? `沟通风格已设置为 ${val}` : '已清除手动沟通风格（恢复自动推断）')
+    message.success(val ? t('userProfile.styleSaved', { val }) : t('userProfile.styleClear'))
     fetchUserProfile(selectedJid).then(setProfile).catch(() => null)
   }
 
-  if (!selectedJid) return <Empty description="请选择联系人" style={{ marginTop: 40 }} />
+  if (!selectedJid) return <Empty description={t('userProfile.empty')} style={{ marginTop: 40 }} />
   if (profileLoading) return <Spin style={{ display: 'block', marginTop: 40 }} />
-  if (!profile) return <Empty description="暂无用户画像" style={{ marginTop: 40 }} />
+  if (!profile) return <Empty description={t('userProfile.noProfile')} style={{ marginTop: 40 }} />
 
   const topTopics = Object.entries(profile.topic_preferences ?? {})
     .sort((a, b) => b[1] - a[1])
@@ -387,19 +382,19 @@ const UserProfile: React.FC = () => {
   return (
     <div style={{ padding: 12 }}>
       <Title level={5} style={{ marginBottom: 12 }}>
-        用户画像
+        {t('userProfile.title')}
       </Title>
 
       <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
         <Col span={12}>
           <Card size="small">
-            <Statistic title="总互动次数" value={profile.total_interactions} />
+            <Statistic title={t('userProfile.totalInteractions')} value={profile.total_interactions} />
           </Card>
         </Col>
         <Col span={12}>
           <Card size="small">
             <Statistic
-              title="满意度"
+              title={t('userProfile.satisfaction')}
               value={
                 profile.satisfaction_score != null
                   ? `${(profile.satisfaction_score * 100).toFixed(0)}%`
@@ -411,7 +406,7 @@ const UserProfile: React.FC = () => {
       </Row>
 
       <Descriptions size="small" column={1} bordered style={{ marginBottom: 12 }}>
-        <Descriptions.Item label="用户分类">
+        <Descriptions.Item label={t('userProfile.category')}>
           <InlineTagEditor
             value={profile.user_category}
             isManual={profile.user_category_is_manual ?? false}
@@ -421,7 +416,7 @@ const UserProfile: React.FC = () => {
             onSave={handleSaveCategory}
           />
         </Descriptions.Item>
-        <Descriptions.Item label="沟通风格">
+        <Descriptions.Item label={t('userProfile.commStyle')}>
           <InlineTagEditor
             value={profile.communication_style}
             isManual={profile.communication_style_is_manual ?? false}
@@ -431,13 +426,13 @@ const UserProfile: React.FC = () => {
             onSave={handleSaveStyle}
           />
         </Descriptions.Item>
-        <Descriptions.Item label="当前策略">
-          <Tag color="green">{profile.current_strategy ?? '默认'}</Tag>
+        <Descriptions.Item label={t('userProfile.currentStrategy')}>
+          <Tag color="green">{profile.current_strategy ?? t('userProfile.default')}</Tag>
         </Descriptions.Item>
-        <Descriptions.Item label="首次访问">
+        <Descriptions.Item label={t('userProfile.firstSeen')}>
           {profile.first_seen ? dayjs(profile.first_seen).format('YYYY-MM-DD') : '—'}
         </Descriptions.Item>
-        <Descriptions.Item label="最后访问">
+        <Descriptions.Item label={t('userProfile.lastSeen')}>
           {profile.last_seen ? dayjs(profile.last_seen).format('YYYY-MM-DD HH:mm') : '—'}
         </Descriptions.Item>
       </Descriptions>
@@ -452,7 +447,7 @@ const UserProfile: React.FC = () => {
             size="small"
             onClick={handleOpenModal}
           >
-            调整此会话策略
+            {t('userProfile.adjustStrategy')}
           </Button>
         </Col>
         <Col span={10}>
@@ -463,14 +458,14 @@ const UserProfile: React.FC = () => {
             loading={rolling}
             onClick={handleRollback}
           >
-            回滚策略
+            {t('userProfile.rollbackStrategy')}
           </Button>
         </Col>
       </Row>
 
       {profile.trend_7d && (
         <div style={{ marginBottom: 8 }}>
-          <Text type="secondary">7日趋势: </Text>
+          <Text type="secondary">{t('userProfile.trend7d')} </Text>
           <TrendIndicator
             direction={profile.trend_7d.direction}
             pct={profile.trend_7d.change_pct}
@@ -481,7 +476,7 @@ const UserProfile: React.FC = () => {
       {topTopics.length > 0 && (
         <div>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            热门话题
+            {t('userProfile.hotTopics')}
           </Text>
           {topTopics.map(([topic, count]) => {
             const maxCount = topTopics[0][1] || 1
@@ -507,65 +502,64 @@ const UserProfile: React.FC = () => {
 
       {/* Per-user strategy modal */}
       <Modal
-        title={`调整策略 — ${selectedJid}`}
+        title={t('userProfile.strategyModalTitle', { jid: selectedJid })}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={handleApply}
         confirmLoading={applying}
-        okText="立即应用"
-        cancelText="取消"
+        okText={t('userProfile.applyNow')}
+        cancelText={t('common.cancel')}
         width={640}
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-          此策略仅对 <strong>{selectedJid}</strong> 生效，覆盖全局策略。
-          下一条 AI 回复即时生效。
+          {t('userProfile.strategyOnlyFor', { jid: selectedJid })}
         </Text>
         <Form form={form} layout="vertical" size="small">
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item label="回复风格" name="response_style">
-                <Select options={STYLE_OPTIONS} placeholder="保持全局默认" allowClear />
+              <Form.Item label={t('userProfile.responseStyle')} name="response_style">
+                <Select options={STYLE_OPTIONS} placeholder={t('userProfile.keepGlobal')} allowClear />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="语气" name="tone">
-                <Select options={TONE_OPTIONS} placeholder="保持全局默认" allowClear />
+              <Form.Item label={t('common.tone')} name="tone">
+                <Select options={TONE_OPTIONS} placeholder={t('userProfile.keepGlobal')} allowClear />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item label="语言" name="language">
-                <Select options={LANG_OPTIONS} placeholder="自动" allowClear />
+              <Form.Item label={t('common.language')} name="language">
+                <Select options={LANG_OPTIONS} placeholder={t('strategyOpts.auto')} allowClear />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="最大回复长度" name="max_response_length">
-                <Input type="number" placeholder="不限制" min={1} />
+              <Form.Item label={t('userProfile.maxLength')} name="max_response_length">
+                <Input type="number" placeholder={t('userProfile.unlimited')} min={1} />
               </Form.Item>
             </Col>
           </Row>
           <Divider style={{ margin: '8px 0' }} />
-          <Form.Item label="自定义指令（追加到系统提示词）" name="custom_instructions">
+          <Form.Item label={t('userProfile.customInstructions')} name="custom_instructions">
             <TextArea
               rows={3}
-              placeholder="例如：这个用户是我们的VIP客户，请格外耐心，并主动询问是否需要升级套餐"
+              placeholder={t('userProfile.customInstructionsPlaceholder')}
             />
           </Form.Item>
-          <Form.Item label="备注（记录原因）" name="note">
-            <Input placeholder="例如：用户反馈AI回复太正式" />
+          <Form.Item label={t('userProfile.noteLabel')} name="note">
+            <Input placeholder={t('userProfile.notePlaceholder')} />
           </Form.Item>
         </Form>
 
         <Divider style={{ margin: '12px 0 8px' }}>
           <Space size={4}>
             <HistoryOutlined />
-            <span style={{ fontSize: 12, color: '#8c8c8c' }}>策略历史</span>
+            <span style={{ fontSize: 12, color: '#8c8c8c' }}>{t('userProfile.strategyHistory')}</span>
           </Space>
         </Divider>
 
         {personalHistory.length === 0 && !historyLoading ? (
-          <Empty description="暂无策略记录" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '8px 0' }} />
+          <Empty description={t('userProfile.noHistory')} image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '8px 0' }} />
         ) : (
           <Table
             dataSource={personalHistory}

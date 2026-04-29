@@ -26,34 +26,36 @@ import {
   deleteStrategyRow,
 } from '../api/endpoints'
 import { useDashboardStore } from '../store'
+import { useTranslation } from 'react-i18next'
 import type { StrategyRecord, StrategyConfig } from '../types'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
 
-const STYLE_OPTIONS = [
-  { label: '正式', value: 'formal' },
-  { label: '随意', value: 'casual' },
-  { label: '简洁', value: 'concise' },
-  { label: '详细', value: 'detailed' },
-]
-
-const TONE_OPTIONS = [
-  { label: '礼貌', value: 'polite' },
-  { label: '友好', value: 'friendly' },
-  { label: '专业', value: 'professional' },
-  { label: '同理心', value: 'empathetic' },
-  { label: '中性', value: 'neutral' },
-]
-
-const LANG_OPTIONS = [
-  { label: '自动', value: 'auto' },
-  { label: '中文', value: 'zh' },
-  { label: '英文', value: 'en' },
-  { label: '混合', value: 'mixed' },
-]
-
 const StrategyPage: React.FC = () => {
+  const { t } = useTranslation()
+
+  const STYLE_OPTIONS = [
+    { label: t('strategyOpts.formal'), value: 'formal' },
+    { label: t('strategyOpts.casual'), value: 'casual' },
+    { label: t('strategyOpts.concise'), value: 'concise' },
+    { label: t('strategyOpts.detailed'), value: 'detailed' },
+  ]
+
+  const TONE_OPTIONS = [
+    { label: t('strategyOpts.polite'), value: 'polite' },
+    { label: t('strategyOpts.friendly'), value: 'friendly' },
+    { label: t('strategyOpts.professional'), value: 'professional' },
+    { label: t('strategyOpts.empathetic'), value: 'empathetic' },
+    { label: t('strategyOpts.neutral'), value: 'neutral' },
+  ]
+
+  const LANG_OPTIONS = [
+    { label: t('strategyOpts.auto'), value: 'auto' },
+    { label: t('strategyOpts.zh'), value: 'zh' },
+    { label: t('strategyOpts.en'), value: 'en' },
+    { label: t('strategyOpts.mixed'), value: 'mixed' },
+  ]
   const [form] = Form.useForm<StrategyConfig & { note?: string }>()
   const globalStrategy = useDashboardStore((s) => s.globalStrategy)
   const setGlobalStrategy = useDashboardStore((s) => s.setGlobalStrategy)
@@ -94,10 +96,10 @@ const StrategyPage: React.FC = () => {
     try {
       await postApplyGlobalStrategy(config, note)
       setGlobalStrategy(config)
-      message.success('全局策略已应用')
+      message.success(t('strategy.applied'))
       loadHistory()
     } catch {
-      message.error('应用策略失败')
+      message.error(t('strategy.applyFailed'))
     } finally {
       setApplying(false)
     }
@@ -107,14 +109,14 @@ const StrategyPage: React.FC = () => {
     setRolling(true)
     try {
       await postRollbackStrategy(null, 1)
-      message.success('已回滚至上一版本')
+      message.success(t('strategy.rolledBack'))
       // Refresh
       const r = await fetchStrategy()
       setGlobalStrategy(r.global)
       form.setFieldsValue(r.global)
       loadHistory()
     } catch {
-      message.error('回滚失败')
+      message.error(t('strategy.rollbackFailed'))
     } finally {
       setRolling(false)
     }
@@ -141,9 +143,9 @@ const StrategyPage: React.FC = () => {
           return r
         }),
       )
-      message.success(result.is_active ? '策略已启用' : '策略已屏蔽')
+      message.success(result.is_active ? t('strategy.enabled') : t('strategy.blocked'))
     } catch {
-      message.error('操作失败')
+      message.error(t('strategy.actionFailed'))
     } finally {
       setRowLoading((prev) => ({ ...prev, [record.id]: false }))
     }
@@ -154,9 +156,9 @@ const StrategyPage: React.FC = () => {
     try {
       await deleteStrategyRow(record.id)
       setStrategyHistory(strategyHistory.filter((r) => r.id !== record.id))
-      message.success('已删除')
+      message.success(t('strategy.deleted'))
     } catch {
-      message.error('删除失败')
+      message.error(t('strategy.deleteFailed'))
     } finally {
       setRowLoading((prev) => ({ ...prev, [record.id]: false }))
     }
@@ -164,7 +166,7 @@ const StrategyPage: React.FC = () => {
 
   const columns = [
     {
-      title: '版本',
+      title: t('common.version'),
       dataIndex: 'version',
       width: 60,
       render: (v: number, r: StrategyRecord) => (
@@ -172,53 +174,53 @@ const StrategyPage: React.FC = () => {
       ),
     },
     {
-      title: '状态',
+      title: t('common.status'),
       dataIndex: 'is_active',
       width: 72,
       render: (active: 0 | 1) =>
         active ? (
-          <Tag color="green" icon={<CheckCircleOutlined />}>激活</Tag>
+          <Tag color="green" icon={<CheckCircleOutlined />}>{t('strategy.activated')}</Tag>
         ) : (
-          <Tag color="default" icon={<StopOutlined />}>已屏蔽</Tag>
+          <Tag color="default" icon={<StopOutlined />}>{t('strategy.inactive')}</Tag>
         ),
     },
     {
-      title: '类型',
+      title: t('common.type'),
       dataIndex: 'strategy_type',
       width: 80,
-      render: (t: string) => (t === 'global' ? <GlobalOutlined /> : t),
+      render: (tp: string) => (tp === 'global' ? <GlobalOutlined /> : tp),
     },
     {
-      title: '风格',
+      title: t('common.style'),
       render: (_: unknown, r: StrategyRecord) => (
         <Text style={{ fontSize: 12 }}>{r.config?.response_style ?? '—'}</Text>
       ),
     },
     {
-      title: '语气',
+      title: t('common.tone'),
       render: (_: unknown, r: StrategyRecord) => (
         <Text style={{ fontSize: 12 }}>{r.config?.tone ?? '—'}</Text>
       ),
     },
     {
-      title: '语言',
+      title: t('common.language'),
       render: (_: unknown, r: StrategyRecord) => (
         <Text style={{ fontSize: 12 }}>{r.config?.language ?? '—'}</Text>
       ),
     },
     {
-      title: '备注',
+      title: t('common.remark'),
       dataIndex: 'note',
       ellipsis: true,
       render: (n: string | null) => n ?? '—',
     },
     {
-      title: '应用时间',
+      title: t('common.time'),
       dataIndex: 'applied_at',
-      render: (t: string) => dayjs(t).format('MM-DD HH:mm'),
+      render: (tp: string) => dayjs(tp).format('MM-DD HH:mm'),
     },
     {
-      title: '操作',
+      title: t('common.actions'),
       width: 110,
       fixed: 'right' as const,
       render: (_: unknown, record: StrategyRecord) => (
@@ -228,17 +230,17 @@ const StrategyPage: React.FC = () => {
             loading={rowLoading[record.id]}
             icon={record.is_active ? <StopOutlined /> : <CheckCircleOutlined />}
             onClick={() => handleToggle(record)}
-            title={record.is_active ? '屏蔽此策略' : '启用此策略'}
+            title={record.is_active ? t('strategy.blockStrategy') : t('strategy.enableStrategy')}
           >
-            {record.is_active ? '屏蔽' : '启用'}
+            {record.is_active ? t('strategy.blockStrategy') : t('strategy.enableStrategy')}
           </Button>
           <Popconfirm
-            title="删除策略"
-            description="此操作不可撤销，确定删除？"
+            title={t('strategy.deleteStrategy')}
+            description={t('strategy.deleteStrategyDesc')}
             onConfirm={() => handleDelete(record)}
-            okText="删除"
+            okText={t('common.delete')}
             okButtonProps={{ danger: true }}
-            cancelText="取消"
+            cancelText={t('common.cancel')}
           >
             <Button
               size="small"
@@ -254,10 +256,10 @@ const StrategyPage: React.FC = () => {
 
   return (
     <div style={{ padding: 16 }}>
-      <Title level={4}>策略管理</Title>
+      <Title level={4}>{t('strategy.title')}</Title>
 
       <Alert
-        message="全局策略会应用于所有用户（个人策略优先级更高）。修改后立即生效，可通过回滚恢复。"
+        message={t('strategy.globalAlert')}
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
@@ -265,27 +267,27 @@ const StrategyPage: React.FC = () => {
 
       <Row gutter={16}>
         <Col xs={24} md={12}>
-          <Card title="编辑全局策略" size="small">
+          <Card title={t('strategy.editGlobal')} size="small">
             <Form
               form={form}
               layout="vertical"
               initialValues={globalStrategy}
               onFinish={handleApply}
             >
-              <Form.Item name="response_style" label="回复风格">
+              <Form.Item name="response_style" label={t('strategy.responseStyle')}>
                 <Select options={STYLE_OPTIONS} />
               </Form.Item>
-              <Form.Item name="tone" label="语气">
+              <Form.Item name="tone" label={t('common.tone')}>
                 <Select options={TONE_OPTIONS} />
               </Form.Item>
-              <Form.Item name="language" label="语言">
+              <Form.Item name="language" label={t('common.language')}>
                 <Select options={LANG_OPTIONS} />
               </Form.Item>
-              <Form.Item name="custom_instructions" label="自定义指令">
-                <TextArea rows={3} placeholder="输入额外指令（可选）" maxLength={500} showCount />
+              <Form.Item name="custom_instructions" label={t('strategy.customInstructions')}>
+                <TextArea rows={3} placeholder={t('strategy.customInstructionsPlaceholder')} maxLength={500} showCount />
               </Form.Item>
-              <Form.Item name="note" label="备注">
-                <Input placeholder="本次修改备注（可选）" maxLength={200} />
+              <Form.Item name="note" label={t('common.remark')}>
+                <Input placeholder={t('strategy.notePlaceholder')} maxLength={200} />
               </Form.Item>
 
               <div style={{ display: 'flex', gap: 8 }}>
@@ -295,17 +297,17 @@ const StrategyPage: React.FC = () => {
                   loading={applying}
                   icon={<GlobalOutlined />}
                 >
-                  应用全局策略
+                  {t('strategy.applyGlobal')}
                 </Button>
                 <Popconfirm
-                  title="回滚全局策略"
-                  description="将回滚至上一个历史版本，确定继续？"
+                  title={t('strategy.rollbackTitle')}
+                  description={t('strategy.rollbackDesc')}
                   onConfirm={handleRollback}
-                  okText="确定"
-                  cancelText="取消"
+                  okText={t('common.confirm')}
+                  cancelText={t('common.cancel')}
                 >
                   <Button icon={<RollbackOutlined />} loading={rolling} danger>
-                    回滚
+                    {t('common.rollback')}
                   </Button>
                 </Popconfirm>
               </div>
@@ -315,7 +317,7 @@ const StrategyPage: React.FC = () => {
 
         <Col xs={24} md={12}>
           <Card
-            title="策略历史"
+            title={t('strategy.history')}
             size="small"
             extra={
               <Button
@@ -324,7 +326,7 @@ const StrategyPage: React.FC = () => {
                 onClick={loadHistory}
                 loading={loadingHistory}
               >
-                刷新
+                {t('common.refresh')}
               </Button>
             }
           >

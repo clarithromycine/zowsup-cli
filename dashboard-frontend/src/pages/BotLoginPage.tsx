@@ -1,11 +1,11 @@
 /**
  * BotLoginPage.tsx
  * ─────────────────
- * Bot 综合管理界面
+ * Bot Management — account list, import/export, one-click start, login tabs
  *
  * Layout:
- *   Card 1 — Bot 账号列表  (list / import / export / one-click-start / mark-failed / delete)
- *   Card 2 — 登录管理 Tabs (启动已注册Bot / 扫描二维码 / 链接码登录)
+ *   Card 1 — Bot Account List  (list / import / export / one-click-start / mark-failed / delete)
+ *   Card 2 — Login Tabs (Start Registered Bot / Scan QR / Link Code)
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
@@ -55,6 +55,7 @@ import {
 } from '../api/endpoints'
 import type { BotAccount } from '../api/endpoints'
 import { getApiToken } from '../api/client'
+import { useTranslation } from 'react-i18next'
 
 const { Paragraph, Text } = Typography
 
@@ -63,6 +64,7 @@ const { Paragraph, Text } = Typography
 // ────────────────────────────────────────────────────────────────────────────
 
 const QrLoginTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLoginSuccess }) => {
+  const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [qrLines, setQrLines] = useState<string[]>([])
   const [statusMsg, setStatusMsg] = useState<string>('')
@@ -81,7 +83,7 @@ const QrLoginTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLog
       await postBotLoginScan()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setStreamError(`启动扫码失败: ${msg}`)
+      setStreamError(t('qr.startFailed', { msg }))
       setLoading(false)
       return
     }
@@ -102,15 +104,15 @@ const QrLoginTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLog
         const payload = JSON.parse(e.data) as { type: string; jid?: string; msg?: string }
         if (payload.type === 'login_success') {
           es.close()
-          setStatusMsg(`登录成功: ${payload.jid ?? ''}`)
+          setStatusMsg(t('qr.loginSuccess', { jid: payload.jid ?? '' }))
           onLoginSuccess(payload.jid ?? '')
         } else if (payload.type === 'timeout') {
           es.close()
-          setStreamError('二维码已超时，请重新生成')
+          setStreamError(t('qr.timeout'))
           setLoading(false)
         } else if (payload.type === 'error') {
           es.close()
-          setStreamError(payload.msg ?? '未知错误')
+          setStreamError(payload.msg ?? t('qr.unknown'))
           setLoading(false)
         }
       } catch {
@@ -120,10 +122,10 @@ const QrLoginTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLog
 
     es.onerror = () => {
       es.close()
-      setStreamError('SSE 连接中断')
+      setStreamError(t('qr.sseError'))
       setLoading(false)
     }
-  }, [onLoginSuccess])
+  }, [onLoginSuccess, t])
 
   useEffect(() => {
     return () => {
@@ -139,14 +141,14 @@ const QrLoginTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLog
         loading={loading}
         onClick={startScan}
       >
-        {qrLines.length > 0 ? '刷新二维码' : '生成二维码'}
+        {qrLines.length > 0 ? t('qr.refreshQr') : t('qr.generateQr')}
       </Button>
 
       {streamError && <Alert type="error" message={streamError} showIcon />}
 
       {statusMsg && <Alert type="success" message={statusMsg} showIcon />}
 
-      {loading && <Spin tip="等待二维码..." />}
+      {loading && <Spin tip={t('qr.waiting')} />}
 
       {qrLines.length > 0 && !statusMsg && (
         <pre
@@ -168,7 +170,7 @@ const QrLoginTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLog
       )}
 
       <Paragraph type="secondary" style={{ marginTop: 8 }}>
-        用手机 WhatsApp → 设置 → 已连接的设备 → 连接设备，扫描上方二维码
+        {t('qr.hint')}
       </Paragraph>
     </Space>
   )
@@ -179,6 +181,7 @@ const QrLoginTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLog
 // ────────────────────────────────────────────────────────────────────────────
 
 const LinkCodeTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLoginSuccess }) => {
+  const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [linkCode, setLinkCode] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -195,7 +198,7 @@ const LinkCodeTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLo
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setError(`获取链接码失败: ${msg}`)
+      setError(t('link.failed', { msg }))
     } finally {
       setLoading(false)
     }
@@ -207,8 +210,8 @@ const LinkCodeTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLo
         <Form.Item
           name="phone"
           rules={[
-            { required: true, message: '请输入手机号' },
-            { pattern: /^\+\d{7,15}$/, message: '格式：+86xxxxxxxxxx' },
+            { required: true, message: t('link.phoneRequired') },
+            { pattern: /^\+\d{7,15}$/, message: t('link.phoneFormat') },
           ]}
         >
           <Input
@@ -219,7 +222,7 @@ const LinkCodeTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLo
         </Form.Item>
         <Form.Item>
           <Button type="primary" htmlType="submit" loading={loading} icon={<LinkOutlined />}>
-            获取链接码
+            {t('link.getCode')}
           </Button>
         </Form.Item>
       </Form>
@@ -231,18 +234,18 @@ const LinkCodeTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLo
           style={{ maxWidth: 300, textAlign: 'center', marginTop: 16 }}
           bordered
         >
-          <Title level={2} style={{ letterSpacing: 8, fontFamily: 'monospace', margin: 0 }}>
+          <div style={{ fontSize: 28, letterSpacing: 8, fontFamily: 'monospace', margin: 0, fontWeight: 700 }}>
             {linkCode}
-          </Title>
+          </div>
           <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-            在手机 WhatsApp → 已连接的设备 → 输入此码
+            {t('link.hint')}
           </Text>
           <Button
             type="link"
             style={{ marginTop: 8 }}
-            onClick={() => onLoginSuccess('(linkcode登录)')}
+            onClick={() => onLoginSuccess(t('link.doneTitle'))}
           >
-            已完成登录 →
+            {t('link.done')}
           </Button>
         </Card>
       )}
@@ -257,6 +260,7 @@ const LinkCodeTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLo
 type StartPhase = 'idle' | 'starting' | 'streaming' | 'connected' | 'error'
 
 const StartBotTab: React.FC = () => {
+  const { t } = useTranslation()
   const [phase, setPhase] = useState<StartPhase>('idle')
   const [logs, setLogs] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -293,11 +297,11 @@ const StartBotTab: React.FC = () => {
 
     try {
       const res = await postBotStart(phone.trim().replace(/^\+/, ''))
-      setLogs([`▶ Bot 进程已启动 (PID=${res.pid})`])
+      setLogs([t('startBot.botStarted', { pid: res.pid })])
       setPhase('streaming')
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setError(`启动失败: ${msg}`)
+      setError(t('startBot.startFailed', { msg }))
       setPhase('error')
       return
     }
@@ -326,15 +330,15 @@ const StartBotTab: React.FC = () => {
           setBotRunning(true)
           setRunningPid(payload.pid ?? null)
           setPhase('connected')
-          setLogs((prev) => [...prev, `✅ 已连接: ${payload.jid ?? '(未知JID)'}`])
+          setLogs((prev) => [...prev, t('startBot.connected', { jid: payload.jid ?? t('startBot.unknownJid') })])
         } else if (payload.type === 'error') {
           es.close()
-          setError(payload.msg ?? '未知错误')
+          setError(payload.msg ?? '')
           setPhase('error')
         } else if (payload.type === 'timeout') {
           es.close()
           // Timeout just means the stream closed; bot may still be connecting in background
-          setLogs((prev) => [...prev, '⏱ 日志流结束（Bot 仍在后台运行中）'])
+          setLogs((prev) => [...prev, t('startBot.logStreamEnded')])
           setPhase('idle')
           setBotRunning(true)
         }
@@ -346,7 +350,7 @@ const StartBotTab: React.FC = () => {
     es.onerror = () => {
       es.close()
       if (phase === 'streaming') {
-        setLogs((prev) => [...prev, '— 日志流已断开 —'])
+        setLogs((prev) => [...prev, t('startBot.streamDisconnected')])
         setPhase('idle')
       }
     }
@@ -363,7 +367,7 @@ const StartBotTab: React.FC = () => {
       setLogs([])
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setError(`停止失败: ${msg}`)
+      setError(t('startBot.stopFailed', { msg }))
     } finally {
       setStopLoading(false)
     }
@@ -379,11 +383,11 @@ const StartBotTab: React.FC = () => {
     <Space direction="vertical" style={{ width: '100%' }}>
       {/* Current status badge */}
       <Space>
-        <Text>当前状态:</Text>
+        <Text>{t('startBot.currentStatus')}</Text>
         {botRunning ? (
-          <Tag color="green">运行中{runningPid ? ` (PID ${runningPid})` : ''}</Tag>
+          <Tag color="green">{t('startBot.running')}{runningPid ? ` (PID ${runningPid})` : ''}</Tag>
         ) : (
-          <Tag color="default">未运行</Tag>
+          <Tag color="default">{t('startBot.notRunning')}</Tag>
         )}
         {connectedJid && <Tag color="blue">{connectedJid}</Tag>}
       </Space>
@@ -395,17 +399,17 @@ const StartBotTab: React.FC = () => {
           loading={stopLoading}
           onClick={handleStop}
         >
-          停止 Bot
+          {t('startBot.stop')}
         </Button>
       ) : (
         <Form form={form} layout="inline" onFinish={handleStart}>
           <Form.Item
             name="phone"
             rules={[
-              { required: true, message: '请输入手机号' },
+              { required: true, message: t('startBot.phoneRequired') },
               {
                 pattern: /^\+?\d{7,15}$/,
-                message: '格式：+86xxxxxxxxxx 或 86xxxxxxxxxx',
+                message: t('startBot.phoneFormat'),
               },
             ]}
           >
@@ -423,7 +427,7 @@ const StartBotTab: React.FC = () => {
               loading={phase === 'starting' || phase === 'streaming'}
               icon={<PlayCircleOutlined />}
             >
-              启动 Bot
+              {t('startBot.start')}
             </Button>
           </Form.Item>
         </Form>
@@ -440,7 +444,7 @@ const StartBotTab: React.FC = () => {
       )}
 
       {phase === 'connected' && connectedJid && (
-        <Alert type="success" message={`Bot 已连接: ${connectedJid}`} showIcon />
+        <Alert type="success" message={t('startBot.connected', { jid: connectedJid })} showIcon />
       )}
 
       {/* Log output */}
@@ -468,12 +472,11 @@ const StartBotTab: React.FC = () => {
       )}
 
       {phase === 'streaming' && (
-        <Spin size="small" tip="等待 Bot 连接中…" />
+        <Spin size="small" tip={t('startBot.connecting')} />
       )}
 
       <Paragraph type="secondary" style={{ marginTop: 8 }}>
-        输入已注册的手机号（完整国际格式，如 <Text code>989334018988</Text>），点击启动后
-        Bot 会在后台运行，相当于执行 <Text code>python script/main.py &lt;phone&gt;</Text>。
+        {t('startBot.hint')}
       </Paragraph>
     </Space>
   )
@@ -484,6 +487,7 @@ const StartBotTab: React.FC = () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 const AccountsSection: React.FC = () => {
+  const { t } = useTranslation()
   const [accounts, setAccounts] = useState<BotAccount[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedPhones, setSelectedPhones] = useState<string[]>([])
@@ -543,11 +547,11 @@ const AccountsSection: React.FC = () => {
 
     try {
       const res = await postBotStart(phone)
-      setStartLogs([`▶ 启动成功 (PID=${res.pid})`])
+      setStartLogs([t('bot.startSuccess', { pid: res.pid })])
       setStartPhase('streaming')
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setStartLogs([`❌ 启动失败: ${msg}`])
+      setStartLogs([t('bot.startFailed', { msg })])
       setStartPhase('error')
       return
     }
@@ -563,16 +567,16 @@ const AccountsSection: React.FC = () => {
         const p = JSON.parse(e.data) as { type: string; jid?: string; pid?: number; msg?: string }
         if (p.type === 'connected') {
           es.close()
-          setStartLogs((prev) => [...prev, `✅ 已连接: ${p.jid ?? ''}`])
+          setStartLogs((prev) => [...prev, t('bot.connected', { jid: p.jid ?? '' })])
           setStartPhase('done')
           load()
         } else if (p.type === 'error') {
           es.close()
-          setStartLogs((prev) => [...prev, `❌ ${p.msg ?? '未知错误'}`])
+          setStartLogs((prev) => [...prev, t('bot.errorMsg', { msg: p.msg ?? '' })])
           setStartPhase('error')
         } else if (p.type === 'timeout') {
           es.close()
-          setStartLogs((prev) => [...prev, '⏱ 日志流结束（Bot 仍在后台运行中）'])
+          setStartLogs((prev) => [...prev, t('startBot.logStreamEnded')])
           setStartPhase('done')
           load()
         }
@@ -580,7 +584,7 @@ const AccountsSection: React.FC = () => {
     })
     es.onerror = () => {
       es.close()
-      setStartLogs((p) => [...p, '— 日志流已断开 —'])
+      setStartLogs((p) => [...p, t('startBot.streamDisconnected')])
       setStartPhase('done')
     }
   }
@@ -596,7 +600,7 @@ const AccountsSection: React.FC = () => {
     try {
       await deleteBotAccount(phone)
       setAccounts((prev) => prev.filter((a) => a.phone !== phone))
-      msgApi.success(`已删除 ${phone}`)
+      msgApi.success(t('bot.deletedAccount', { phone }))
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       msgApi.error(msg)
@@ -629,7 +633,7 @@ const AccountsSection: React.FC = () => {
   const handleDeleteAllFailed = async () => {
     try {
       const res = await deleteFailedAccounts()
-      msgApi.success(`已删除 ${res.deleted.length} 个失败账号`)
+      msgApi.success(t('bot.deleteFailedAccountsCount', { count: res.deleted.length }))
       load()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -645,14 +649,14 @@ const AccountsSection: React.FC = () => {
     setImportResult(null)
     try {
       const res = await importBotAccounts(lines)
-      setImportResult(`导入完成：成功 ${res.imported} / 共 ${res.total}`)
+      setImportResult(t('bot.importDone', { imported: res.imported, total: res.total }))
       if (res.imported > 0) {
         load()
         setImportText('')
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setImportResult(`错误: ${msg}`)
+      setImportResult(t('bot.importError', { msg }))
     } finally {
       setImporting(false)
     }
@@ -667,7 +671,7 @@ const AccountsSection: React.FC = () => {
       const res = await exportBotAccounts(phones)
       setExportText(res.lines.join('\n'))
       if (res.errors.length > 0) {
-        msgApi.warning(`${res.errors.length} 个账号导出失败`)
+        msgApi.warning(t('bot.exportFailed', { count: res.errors.length }))
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -681,37 +685,37 @@ const AccountsSection: React.FC = () => {
 
   const columns: ColumnsType<BotAccount> = [
     {
-      title: '手机号',
+      title: t('bot.phone'),
       dataIndex: 'phone',
       key: 'phone',
       render: (phone: string) => <Text code>{phone}</Text>,
     },
     {
-      title: '推送名',
+      title: t('bot.pushname'),
       dataIndex: 'pushname',
       key: 'pushname',
       render: (v: string | null) => v ?? <Text type="secondary">—</Text>,
     },
     {
-      title: '状态',
+      title: t('common.status'),
       key: 'status',
       width: 110,
       render: (_: unknown, record: BotAccount) => {
         if (record.is_running)
-          return <Tag color="green" icon={<CheckCircleOutlined />}>运行中</Tag>
+          return <Tag color="green" icon={<CheckCircleOutlined />}>{t('bot.running')}</Tag>
         if (record.is_failed)
-          return <Tag color="red" icon={<WarningOutlined />}>登录失败</Tag>
-        return <Tag color="default">离线</Tag>
+          return <Tag color="red" icon={<WarningOutlined />}>{t('bot.loginFailed')}</Tag>
+        return <Tag color="default">{t('bot.offline')}</Tag>
       },
     },
     {
-      title: '操作',
+      title: t('common.actions'),
       key: 'actions',
       fixed: 'right' as const,
       width: 240,
       render: (_: unknown, record: BotAccount) => (
         <Space size={4}>
-          <Tooltip title="一键启动">
+          <Tooltip title={t('bot.quickStart')}>
             <Button
               size="small"
               type="primary"
@@ -720,20 +724,20 @@ const AccountsSection: React.FC = () => {
               loading={rowLoading[record.phone]}
               onClick={() => handleQuickStart(record.phone)}
             >
-              启动
+              {t('bot.start')}
             </Button>
           </Tooltip>
-          <Tooltip title={record.is_failed ? '取消失败标记' : '标记为登录失败'}>
+          <Tooltip title={record.is_failed ? t('bot.unmarkFailed') : t('bot.markFailed')}>
             <Button
               size="small"
               icon={record.is_failed ? <CheckCircleOutlined /> : <WarningOutlined />}
               loading={rowLoading[record.phone]}
               onClick={() => handleToggleFailed(record.phone)}
             >
-              {record.is_failed ? '取消标记' : '标记失败'}
+              {record.is_failed ? t('bot.unmarkFailed') : t('bot.markFailed')}
             </Button>
           </Tooltip>
-          <Tooltip title="导出六段号">
+          <Tooltip title={t('bot.exportSegment')}>
             <Button
               size="small"
               icon={<CloudDownloadOutlined />}
@@ -741,10 +745,10 @@ const AccountsSection: React.FC = () => {
             />
           </Tooltip>
           <Popconfirm
-            title="确认删除此账号？"
-            description="此操作不可撤销，将删除账号目录"
+            title={t('bot.deleteAccount')}
+            description={t('bot.deleteAccountDesc')}
             onConfirm={() => handleDelete(record.phone)}
-            okText="删除"
+            okText={t('common.delete')}
             okButtonProps={{ danger: true }}
           >
             <Button
@@ -766,35 +770,39 @@ const AccountsSection: React.FC = () => {
 
   return (
     <Card
-      title="Bot 账号列表"
+      title={t('bot.accountList')}
       style={{ marginBottom: 24 }}
       extra={
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
-            刷新
+            {t('common.refresh')}
           </Button>
           <Button
             icon={<CloudUploadOutlined />}
             onClick={() => { setImportOpen(true); setImportResult(null) }}
           >
-            导入
+            {t('common.import')}
           </Button>
           <Button
             icon={<CloudDownloadOutlined />}
             disabled={selectedPhones.length === 0}
             onClick={() => handleExport(selectedPhones)}
           >
-            批量导出{selectedPhones.length > 0 ? ` (${selectedPhones.length})` : ''}
+            {selectedPhones.length > 0
+              ? t('bot.batchExportCount', { count: selectedPhones.length })
+              : t('bot.batchExport')}
           </Button>
           <Popconfirm
-            title={`确认删除全部 ${failedCount} 个失败账号？`}
+            title={t('bot.deleteFailedAccounts', { count: failedCount })}
             onConfirm={handleDeleteAllFailed}
             disabled={failedCount === 0}
-            okText="全部删除"
+            okText={t('bot.deleteAll')}
             okButtonProps={{ danger: true }}
           >
             <Button danger disabled={failedCount === 0} icon={<DeleteOutlined />}>
-              删除失败账号{failedCount > 0 ? ` (${failedCount})` : ''}
+              {failedCount > 0
+                ? t('bot.deleteFailedAccountsCount', { count: failedCount })
+                : t('bot.deleteFailedAccounts', { count: 0 })}
             </Button>
           </Popconfirm>
         </Space>
@@ -810,33 +818,33 @@ const AccountsSection: React.FC = () => {
         size="small"
         pagination={{ pageSize: 10, hideOnSinglePage: true }}
         scroll={{ x: 700 }}
-        locale={{ emptyText: '暂无账号，请先导入六段号' }}
+        locale={{ emptyText: t('bot.emptyText') }}
       />
 
       {/* ── Import modal ── */}
       <Modal
-        title="导入六段号"
+        title={t('bot.import6Segment')}
         open={importOpen}
         onOk={handleImport}
         onCancel={() => { setImportOpen(false); setImportResult(null) }}
         confirmLoading={importing}
-        okText="导入"
+        okText={t('common.import')}
         width={560}
       >
         <Paragraph type="secondary" style={{ marginBottom: 8 }}>
-          每行一条，格式：<Text code>phone,pk1,sk1,pk2,sk2,sixth</Text>
+          {t('bot.importFormat')}
         </Paragraph>
         <Input.TextArea
           rows={8}
           value={importText}
           onChange={(e) => setImportText(e.target.value)}
-          placeholder="粘贴六段号数据，每行一条"
+          placeholder={t('bot.pasteHere')}
           style={{ fontFamily: 'monospace', fontSize: 12 }}
         />
         {importResult && (
           <Alert
             style={{ marginTop: 12 }}
-            type={importResult.startsWith('错误') ? 'error' : 'success'}
+            type={importResult.startsWith(t('bot.importError', { msg: '' }).split(':')[0]) ? 'error' : 'success'}
             message={importResult}
             showIcon
           />
@@ -845,7 +853,7 @@ const AccountsSection: React.FC = () => {
 
       {/* ── Export modal ── */}
       <Modal
-        title="导出六段号"
+        title={t('bot.export6Segment')}
         open={exportOpen}
         onCancel={() => setExportOpen(false)}
         footer={
@@ -853,13 +861,13 @@ const AccountsSection: React.FC = () => {
             <Button
               onClick={() => {
                 navigator.clipboard.writeText(exportText)
-                msgApi.success('已复制到剪贴板')
+                msgApi.success(t('common.copied'))
               }}
               disabled={!exportText}
             >
-              复制全部
+              {t('common.copyAll')}
             </Button>
-            <Button onClick={() => setExportOpen(false)}>关闭</Button>
+            <Button onClick={() => setExportOpen(false)}>{t('common.close')}</Button>
           </Space>
         }
         width={560}
@@ -878,12 +886,12 @@ const AccountsSection: React.FC = () => {
 
       {/* ── One-click start log modal ── */}
       <Modal
-        title={`启动 Bot — ${startPhone}`}
+        title={t('bot.startBotTitle', { phone: startPhone })}
         open={startModalOpen}
         onCancel={closeStartModal}
         footer={
           <Button onClick={closeStartModal}>
-            {startPhase === 'done' || startPhase === 'error' ? '关闭' : '取消'}
+            {startPhase === 'done' || startPhase === 'error' ? t('common.close') : t('common.cancel')}
           </Button>
         }
         width={560}
@@ -906,7 +914,7 @@ const AccountsSection: React.FC = () => {
         >
           {startLogs.length === 0 && startPhase === 'starting' && <Spin size="small" />}
           {startLogs.map((line, i) => <div key={i}>{line}</div>)}
-          {startPhase === 'streaming' && <Spin size="small" tip="连接中…" style={{ marginTop: 4 }} />}
+          {startPhase === 'streaming' && <Spin size="small" tip={t('startBot.connecting')} style={{ marginTop: 4 }} />}
           <div ref={logsBottomRef} />
         </div>
       </Modal>
@@ -920,14 +928,15 @@ const AccountsSection: React.FC = () => {
 
 const BotLoginPage: React.FC = () => {
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const [msgApi, contextHolder] = message.useMessage()
 
   const handleSuccess = useCallback(
     (jid: string) => {
-      msgApi.success(`登录成功${jid ? ` — ${jid}` : ''}，正在跳转…`)
+      msgApi.success(t('bot.loginSuccess', { jid: jid ? ` — ${jid}` : '' }))
       setTimeout(() => navigate('/'), 2000)
     },
-    [navigate, msgApi],
+    [navigate, msgApi, t],
   )
 
   return (
@@ -942,7 +951,7 @@ const BotLoginPage: React.FC = () => {
         title={
           <Space>
             <QrcodeOutlined style={{ fontSize: 18 }} />
-            <span>登录管理</span>
+            <span>{t('bot.loginManagement')}</span>
           </Space>
         }
       >
@@ -951,17 +960,17 @@ const BotLoginPage: React.FC = () => {
           items={[
             {
               key: 'start',
-              label: (<span><PlayCircleOutlined /> 启动已注册Bot</span>),
+              label: (<span><PlayCircleOutlined /> {t('bot.startRegistered')}</span>),
               children: <StartBotTab />,
             },
             {
               key: 'scan',
-              label: '扫描二维码',
+              label: t('bot.scanQr'),
               children: <QrLoginTab onLoginSuccess={handleSuccess} />,
             },
             {
               key: 'linkcode',
-              label: '链接码登录',
+              label: t('bot.linkCodeLogin'),
               children: <LinkCodeTab onLoginSuccess={handleSuccess} />,
             },
           ]}

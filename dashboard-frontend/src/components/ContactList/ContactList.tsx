@@ -4,6 +4,7 @@ import { UserOutlined, SearchOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { fetchChatHistory, fetchContacts, fetchContactAvatar, refreshContactAvatar } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
+import { useTranslation } from 'react-i18next'
 
 const { Text } = Typography
 
@@ -22,6 +23,7 @@ function jidToName(jid: string): string {
  * stored in the Zustand store.
  */
 const ContactList: React.FC = () => {
+  const { t } = useTranslation()
   const contacts = useDashboardStore((s) => s.contacts)
   const selectedJid = useDashboardStore((s) => s.selectedJid)
   const selectJid = useDashboardStore((s) => s.selectJid)
@@ -99,7 +101,7 @@ const ContactList: React.FC = () => {
       <div style={{ padding: '12px 8px' }}>
         <Input
           prefix={<SearchOutlined />}
-          placeholder="搜索联系人"
+          placeholder={t('contactList.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           size="small"
@@ -110,7 +112,7 @@ const ContactList: React.FC = () => {
       {loading ? (
         <Spin style={{ margin: 'auto' }} />
       ) : filtered.length === 0 ? (
-        <Empty description="暂无联系人" style={{ marginTop: 40 }} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description={t('contactList.empty')} style={{ marginTop: 40 }} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
         <List
           style={{ overflow: 'auto', flex: 1 }}

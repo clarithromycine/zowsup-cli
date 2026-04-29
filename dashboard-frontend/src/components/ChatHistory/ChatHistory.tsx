@@ -4,15 +4,17 @@ import { RobotOutlined, UserOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { fetchChatHistory } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
+import { useTranslation } from 'react-i18next'
 import type { ChatMessage } from '../../types'
 
 const { Text } = Typography
 
 function SourceTag({ direction }: { direction: 'in' | 'out' }) {
+  const { t } = useTranslation()
   return direction === 'out' ? (
     <Tag color="green" icon={<RobotOutlined />} style={{ margin: 0, fontSize: 11 }}>AI</Tag>
   ) : (
-    <Tag icon={<UserOutlined />} style={{ margin: 0, fontSize: 11, color: '#888', borderColor: '#d9d9d9', background: '#fafafa' }}>用户</Tag>
+    <Tag icon={<UserOutlined />} style={{ margin: 0, fontSize: 11, color: '#888', borderColor: '#d9d9d9', background: '#fafafa' }}>{t('chatHistory.user')}</Tag>
   )
 }
 
@@ -56,6 +58,7 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
 const PAGE_SIZE = 50
 
 const ChatHistory: React.FC = () => {
+  const { t } = useTranslation()
   const selectedJid = useDashboardStore((s) => s.selectedJid)
   const messages = useDashboardStore((s) => s.messages)
   const messagesPage = useDashboardStore((s) => s.messagesPage)
@@ -89,7 +92,7 @@ const ChatHistory: React.FC = () => {
   if (!selectedJid) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-        <Empty description="请选择一个联系人查看聊天记录" />
+        <Empty description={t('chatHistory.selectContact')} />
       </div>
     )
   }
@@ -97,7 +100,7 @@ const ChatHistory: React.FC = () => {
   if (messagesLoading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-        <Spin tip="加载中..." />
+        <Spin tip={t('chatHistory.loading')} />
       </div>
     )
   }
@@ -105,7 +108,7 @@ const ChatHistory: React.FC = () => {
   if (messages.length === 0) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-        <Empty description="暂无聊天记录" />
+        <Empty description={t('chatHistory.empty')} />
       </div>
     )
   }
@@ -147,7 +150,7 @@ const ChatHistory: React.FC = () => {
           total={messagesTotal}
           onChange={handlePageChange}
           size="small"
-          showTotal={(t) => `共 ${t} 条`}
+          showTotal={(total) => t('common.totalItems', { count: total })}
           showSizeChanger={false}
         />
       </div>

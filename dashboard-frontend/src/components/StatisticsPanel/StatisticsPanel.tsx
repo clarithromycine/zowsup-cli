@@ -9,8 +9,10 @@ import {
 import ReactECharts from 'echarts-for-react'
 import { fetchStatistics } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
+import { useTranslation } from 'react-i18next'
 
 const StatisticsPanel: React.FC = () => {
+  const { t } = useTranslation()
   const stats = useDashboardStore((s) => s.stats)
   const statsLoading = useDashboardStore((s) => s.statsLoading)
   const setStats = useDashboardStore((s) => s.setStats)
@@ -40,14 +42,14 @@ const StatisticsPanel: React.FC = () => {
     legend: { orient: 'vertical', right: 10, top: 'center', textStyle: { fontSize: 12 } },
     series: [
       {
-        name: '消息构成',
+        name: t('stats.messageComposition'),
         type: 'pie',
         radius: ['40%', '70%'],
         avoidLabelOverlap: false,
         label: { show: false },
         data: [
-          { value: stats.ai_responses, name: 'AI回复' },
-          { value: stats.total_messages - stats.ai_responses, name: '其他' },
+          { value: stats.ai_responses, name: t('stats.aiReplies') },
+          { value: stats.total_messages - stats.ai_responses, name: t('stats.other') },
         ],
       },
     ],
@@ -56,11 +58,11 @@ const StatisticsPanel: React.FC = () => {
   // Bar chart placeholder: today vs total
   const barOption = {
     tooltip: {},
-    xAxis: { data: ['今日消息', '总消息', '活跃用户', 'AI回复'] },
+    xAxis: { data: [t('stats.todayMessages'), t('stats.totalMessages'), t('stats.activeUsers'), t('stats.aiReplies')] },
     yAxis: {},
     series: [
       {
-        name: '数量',
+        name: t('stats.overview'),
         type: 'bar',
         data: [
           stats.today_messages,
@@ -80,7 +82,7 @@ const StatisticsPanel: React.FC = () => {
         <Col xs={12} sm={6}>
           <Card size="small">
             <Statistic
-              title="总消息数"
+              title={t('stats.totalMessages')}
               value={stats.total_messages}
               prefix={<MessageOutlined />}
             />
@@ -89,7 +91,7 @@ const StatisticsPanel: React.FC = () => {
         <Col xs={12} sm={6}>
           <Card size="small">
             <Statistic
-              title="活跃用户"
+              title={t('stats.activeUsers')}
               value={stats.active_users}
               prefix={<TeamOutlined />}
             />
@@ -98,7 +100,7 @@ const StatisticsPanel: React.FC = () => {
         <Col xs={12} sm={6}>
           <Card size="small">
             <Statistic
-              title="AI回复"
+              title={t('stats.aiReplies')}
               value={stats.ai_responses}
               prefix={<RobotOutlined />}
             />
@@ -107,10 +109,10 @@ const StatisticsPanel: React.FC = () => {
         <Col xs={12} sm={6}>
           <Card size="small">
             <Statistic
-              title="今日消息"
+              title={t('stats.todayMessages')}
               value={stats.today_messages}
               prefix={<ThunderboltOutlined />}
-              suffix={<small style={{ fontSize: 11 }}>AI率 {aiRate}%</small>}
+              suffix={<small style={{ fontSize: 11 }}>{t('stats.aiRate', { rate: aiRate })}</small>}
             />
           </Card>
         </Col>
@@ -118,12 +120,12 @@ const StatisticsPanel: React.FC = () => {
 
       <Row gutter={[12, 12]}>
         <Col xs={24} sm={12}>
-          <Card title="消息构成" size="small">
+          <Card title={t('stats.messageComposition')} size="small">
             <ReactECharts option={pieOption} style={{ height: 200 }} />
           </Card>
         </Col>
         <Col xs={24} sm={12}>
-          <Card title="数量概览" size="small">
+          <Card title={t('stats.overview')} size="small">
             <ReactECharts option={barOption} style={{ height: 200 }} />
           </Card>
         </Col>

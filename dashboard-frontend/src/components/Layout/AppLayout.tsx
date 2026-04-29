@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Layout, Menu, Badge, Tooltip, Typography, Space } from 'antd'
+import { Layout, Menu, Badge, Tooltip, Typography, Space, Button } from 'antd'
 import logoSrc from '../../assets/zowsup-logo.png'
 import {
   DashboardOutlined,
@@ -9,6 +9,7 @@ import {
   RobotOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useDashboardStore } from '../../store'
 import { fetchBotStatus, BotStatus } from '../../api/endpoints'
 
@@ -22,6 +23,7 @@ interface AppLayoutProps {
 const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const navigate = useNavigate()
   const location = useLocation()
+  const { t, i18n } = useTranslation()
   const wsConnected = useDashboardStore((s) => s.wsConnected)
   const collapsed = useDashboardStore((s) => s.siderCollapsed)
   const setSiderCollapsed = useDashboardStore((s) => s.setSiderCollapsed)
@@ -43,19 +45,22 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     {
       key: '/',
       icon: <DashboardOutlined />,
-      label: '仪表板',
+      label: t('nav.dashboard'),
     },
     {
       key: '/strategy',
       icon: <SettingOutlined />,
-      label: '策略管理',
+      label: t('nav.strategy'),
     },
     {
       key: '/login',
       icon: <RobotOutlined />,
-      label: 'Bot 管理',
+      label: t('nav.botManagement'),
     },
   ]
+
+  const isZh = i18n.language.startsWith('zh')
+  const toggleLang = () => i18n.changeLanguage(isZh ? 'en' : 'zh')
 
   return (
     <Layout style={{ height: '100vh' }}>
@@ -109,12 +114,21 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           
           </Text>
           <Space size={20}>
+            {/* Language toggle */}
+            <Tooltip title={isZh ? 'Switch to English' : '切换到中文'}>
+              <Button size="small" onClick={toggleLang}>
+                {isZh ? t('langSwitcher.en') : t('langSwitcher.zh')}
+              </Button>
+            </Tooltip>
+
             {/* Bot online status */}
             <Tooltip
               title={
                 botStatus?.running
-                  ? `Bot 在线${botStatus.jid ? ` — ${botStatus.jid}` : ''}`
-                  : 'Bot 离线'
+                  ? botStatus.jid
+                    ? t('header.botOnlineJid', { jid: botStatus.jid })
+                    : t('header.botOnline')
+                  : t('header.botOffline')
               }
             >
               <Badge
@@ -125,12 +139,12 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                       <RobotOutlined style={{ marginRight: 4 }} />
                       {botStatus.jid
                         ? botStatus.jid.replace('@s.whatsapp.net', '')
-                        : '在线'}
+                        : t('header.online')}
                     </span>
                   ) : (
                     <span style={{ color: '#8c8c8c' }}>
                       <RobotOutlined style={{ marginRight: 4 }} />
-                      离线
+                      {t('header.offline')}
                     </span>
                   )
                 }
@@ -138,19 +152,19 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
             </Tooltip>
 
             {/* WebSocket connection status */}
-            <Tooltip title={wsConnected ? 'WebSocket 已连接' : 'WebSocket 未连接'}>
+            <Tooltip title={wsConnected ? t('header.wsConnected') : t('header.wsDisconnected')}>
               <Badge
                 status={wsConnected ? 'success' : 'error'}
                 text={
                   wsConnected ? (
                     <span>
                       <WifiOutlined style={{ color: '#52c41a', marginRight: 4 }} />
-                      实时
+                      {t('header.realtime')}
                     </span>
                   ) : (
                     <span>
                       <DisconnectOutlined style={{ color: '#ff4d4f', marginRight: 4 }} />
-                      断开
+                      {t('header.disconnected')}
                     </span>
                   )
                 }

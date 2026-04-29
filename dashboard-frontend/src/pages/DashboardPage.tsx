@@ -1,5 +1,6 @@
 import React from 'react'
 import { Row, Col, Card } from 'antd'
+import { useTranslation } from 'react-i18next'
 import ContactList from '../components/ContactList/ContactList'
 import ChatHistory from '../components/ChatHistory/ChatHistory'
 import UserProfile from '../components/UserProfile/UserProfile'
@@ -17,6 +18,7 @@ import StatisticsPanel from '../components/StatisticsPanel/StatisticsPanel'
  *   └─────────────────────────────────────────────────────────────┘
  */
 const DashboardPage: React.FC = () => {
+  const { t } = useTranslation()
   return (
     <div style={{ padding: 16, height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* Top row — 3 columns */}
@@ -24,7 +26,7 @@ const DashboardPage: React.FC = () => {
         <Col flex="240px">
           <Card
             size="small"
-            title="联系人"
+            title={t('dashboard.contacts')}
             bodyStyle={{ padding: 0, height: 'calc(60vh - 100px)', overflow: 'hidden' }}
             style={{ height: '100%' }}
           >
@@ -35,7 +37,7 @@ const DashboardPage: React.FC = () => {
         <Col flex="1">
           <Card
             size="small"
-            title="聊天记录"
+            title={t('dashboard.chatHistory')}
             bodyStyle={{ padding: 0, height: 'calc(60vh - 100px)', overflow: 'hidden' }}
             style={{ height: '100%' }}
           >
@@ -46,7 +48,7 @@ const DashboardPage: React.FC = () => {
         <Col flex="280px">
           <Card
             size="small"
-            title="用户画像"
+            title={t('dashboard.userProfile')}
             bodyStyle={{ height: 'calc(60vh - 100px)', overflow: 'auto', padding: 0 }}
             style={{ height: '100%' }}
           >
@@ -56,7 +58,7 @@ const DashboardPage: React.FC = () => {
       </Row>
 
       {/* Bottom row — statistics */}
-      <Card size="small" title="统计数据" style={{ flex: 1 }}>
+      <Card size="small" title={t('dashboard.statistics')} style={{ flex: 1 }}>
         <StatisticsPanel />
       </Card>
     </div>
