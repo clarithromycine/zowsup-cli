@@ -153,41 +153,6 @@ async def _avatar_poll_task(layer, poll_interval: int = 15):
         logger.debug("Avatar poll task cancelled")
 
 
-    """Asyncio task replacing YowQrCodeThread."""
-    try:
-        while True:
-            refs = layer.getProp("refs")
-            if len(refs) > 0:
-                ref = refs.pop(0)
-                regInfo = layer.getProp("reg_info")
-                keypair = regInfo["keypair"]
-                identity = regInfo["identity"]
-                advSecretKey = random.randbytes(32)
-                logger.debug("{},{},{},{}".format(
-                    str(ref, "utf8"),
-                    str(base64.b64encode(keypair.public.data), "utf8"),
-                    str(base64.b64encode(identity.publicKey.serialize()[1:]), "utf8"),
-                    str(base64.b64encode(advSecretKey), "utf8")
-                ))
-                qr = qrcode.QRCode()
-                qr.border = 1
-                qr.add_data("{},{},{},{}".format(
-                    str(ref, "utf8"),
-                    str(base64.b64encode(keypair.public.data), "utf8"),
-                    str(base64.b64encode(identity.publicKey.serialize()[1:]), "utf8"),
-                    str(base64.b64encode(advSecretKey), "utf8")
-                ))
-                qr.make()
-                qr.print_ascii(out=None, tty=False, invert=False)
-                layer.setProp("refs", refs)
-            else:
-                await layer.getStack().broadcastEvent(YowLayerEvent(YowNetworkLayer.EVENT_STATE_DISCONNECT))
-                return
-            for i in range(0, interval):
-                await asyncio.sleep(1)
-    except asyncio.CancelledError:
-        logger.debug("QR code task cancelled")
-
 class ZowBotLayer(YowInterfaceLayer):
 
     PROP_MESSAGES = "org.openwhatsapp.zowsup.prop.sendclient.queue"
