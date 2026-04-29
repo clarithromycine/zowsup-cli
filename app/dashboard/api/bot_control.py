@@ -105,12 +105,14 @@ def post_login_scan():
 
     try:
         _qr_proc = subprocess.Popen(
-            [sys.executable, str(script_path)],
+            [sys.executable, "-u", str(script_path)],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
             bufsize=1,
             cwd=str(Path.cwd()),
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         _write_pid_file(_qr_proc.pid)
         logger.info("QR scan subprocess started, PID=%s", _qr_proc.pid)

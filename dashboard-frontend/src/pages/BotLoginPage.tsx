@@ -157,12 +157,12 @@ const QrLoginTab: React.FC<{ onLoginSuccess: (jid: string) => void }> = ({ onLog
             color: '#fff',
             padding: 16,
             borderRadius: 8,
-            fontFamily: 'monospace',
-            fontSize: 11,
-            lineHeight: 1.2,
+            fontFamily: '"Courier New", Courier, monospace',
+            fontSize: 10,
+            lineHeight: '1.2em',
+            letterSpacing: 0,
             whiteSpace: 'pre',
             overflowX: 'auto',
-            maxWidth: 600,
           }}
         >
           {qrLines.join('\n')}

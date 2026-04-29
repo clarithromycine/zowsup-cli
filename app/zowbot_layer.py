@@ -105,6 +105,7 @@ async def _qr_code_task(layer, interval):
                 ))
                 qr.make()
                 qr.print_ascii(out=None, tty=False, invert=False)
+                sys.stdout.flush()
                 layer.setProp("refs", refs)
             else:
                 await layer.getStack().broadcastEvent(YowLayerEvent(YowNetworkLayer.EVENT_STATE_DISCONNECT))
@@ -731,6 +732,7 @@ class ZowBotLayer(YowInterfaceLayer):
 
         if isinstance(entity, MultiDevicePairSuccessIqProtocolEntity):                               
             jid = entity.jid
+            print(jid, flush=True)  # signal login success to dashboard SSE stream
             self.setProp("refs",None)          
             self.setProp("jid",jid)     
             self.setProp("botType",ZowBotType.TYPE_RUN_SINGLETON)
