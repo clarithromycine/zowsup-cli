@@ -20,3 +20,5 @@ logs/
 .env
 data/dashboard.db
 data/*.db
+data/*.db-shm
+data/*.db-wal
