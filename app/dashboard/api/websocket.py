@@ -144,6 +144,8 @@ def _monitor_loop(db_path: str) -> None:
             for row in new_rows:
                 last_id = max(last_id, row["id"])
                 emit_new_message(row)
+            # Check for bot-triggered avatar updates (SetPicture notifications)
+            _flush_avatar_updates()
         except Exception:
             logger.exception("WebSocket monitor error")
 
@@ -222,3 +224,22 @@ def emit_profile_updated(jid: str, profile: dict) -> None:
         {"jid": jid, "profile": profile},
         room=f"user:{jid}",
     )
+
+
+def emit_avatar_updated(jid: str, avatar_url: str) -> None:
+    """Emit avatar_updated to all connected clients (global room)."""
+    if socketio is None:
+        return
+    socketio.emit("avatar_updated", {"jid": jid, "avatar_url": avatar_url}, room="global")
+
+
+def _flush_avatar_updates() -> None:
+    """Read pending avatar updates written by the bot process and emit SocketIO events."""
+    try:
+        from app.dashboard.utils.avatar_queue import pop_avatar_updates
+        updates = pop_avatar_updates()
+        for jid, url in updates.items():
+            emit_avatar_updated(jid, url)
+            logger.debug("Emitted avatar_updated for %s", jid)
+    except Exception:
+        logger.exception("_flush_avatar_updates error")

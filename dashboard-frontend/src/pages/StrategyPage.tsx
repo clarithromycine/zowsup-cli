@@ -15,13 +15,15 @@ import {
   Popconfirm,
   Alert,
 } from 'antd'
-import { ReloadOutlined, RollbackOutlined, GlobalOutlined } from '@ant-design/icons'
+import { ReloadOutlined, RollbackOutlined, GlobalOutlined, StopOutlined, CheckCircleOutlined, DeleteOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import {
   fetchStrategy,
   fetchStrategyHistory,
   postApplyGlobalStrategy,
   postRollbackStrategy,
+  patchToggleStrategy,
+  deleteStrategyRow,
 } from '../api/endpoints'
 import { useDashboardStore } from '../store'
 import type { StrategyRecord, StrategyConfig } from '../types'
@@ -60,6 +62,7 @@ const StrategyPage: React.FC = () => {
   const [applying, setApplying] = useState(false)
   const [rolling, setRolling] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
+  const [rowLoading, setRowLoading] = useState<Record<number, boolean>>({})
 
   // Load current global strategy on mount
   useEffect(() => {
@@ -117,6 +120,48 @@ const StrategyPage: React.FC = () => {
     }
   }
 
+  async function handleToggle(record: StrategyRecord) {
+    setRowLoading((prev) => ({ ...prev, [record.id]: true }))
+    try {
+      const result = await patchToggleStrategy(record.id)
+      // Update history in store: flip is_active for affected rows
+      setStrategyHistory(
+        strategyHistory.map((r) => {
+          // The activated row
+          if (r.id === record.id) return { ...r, is_active: result.is_active }
+          // If we activated this row, deactivate others of same type/jid
+          if (
+            result.is_active === 1 &&
+            r.strategy_type === record.strategy_type &&
+            r.user_jid === record.user_jid &&
+            r.id !== record.id
+          ) {
+            return { ...r, is_active: 0 as const }
+          }
+          return r
+        }),
+      )
+      message.success(result.is_active ? '策略已启用' : '策略已屏蔽')
+    } catch {
+      message.error('操作失败')
+    } finally {
+      setRowLoading((prev) => ({ ...prev, [record.id]: false }))
+    }
+  }
+
+  async function handleDelete(record: StrategyRecord) {
+    setRowLoading((prev) => ({ ...prev, [record.id]: true }))
+    try {
+      await deleteStrategyRow(record.id)
+      setStrategyHistory(strategyHistory.filter((r) => r.id !== record.id))
+      message.success('已删除')
+    } catch {
+      message.error('删除失败')
+    } finally {
+      setRowLoading((prev) => ({ ...prev, [record.id]: false }))
+    }
+  }
+
   const columns = [
     {
       title: '版本',
@@ -125,6 +170,17 @@ const StrategyPage: React.FC = () => {
       render: (v: number, r: StrategyRecord) => (
         <Tag color={r.is_active ? 'green' : 'default'}>{v}</Tag>
       ),
+    },
+    {
+      title: '状态',
+      dataIndex: 'is_active',
+      width: 72,
+      render: (active: 0 | 1) =>
+        active ? (
+          <Tag color="green" icon={<CheckCircleOutlined />}>激活</Tag>
+        ) : (
+          <Tag color="default" icon={<StopOutlined />}>已屏蔽</Tag>
+        ),
     },
     {
       title: '类型',
@@ -160,6 +216,39 @@ const StrategyPage: React.FC = () => {
       title: '应用时间',
       dataIndex: 'applied_at',
       render: (t: string) => dayjs(t).format('MM-DD HH:mm'),
+    },
+    {
+      title: '操作',
+      width: 110,
+      fixed: 'right' as const,
+      render: (_: unknown, record: StrategyRecord) => (
+        <div style={{ display: 'flex', gap: 4 }}>
+          <Button
+            size="small"
+            loading={rowLoading[record.id]}
+            icon={record.is_active ? <StopOutlined /> : <CheckCircleOutlined />}
+            onClick={() => handleToggle(record)}
+            title={record.is_active ? '屏蔽此策略' : '启用此策略'}
+          >
+            {record.is_active ? '屏蔽' : '启用'}
+          </Button>
+          <Popconfirm
+            title="删除策略"
+            description="此操作不可撤销，确定删除？"
+            onConfirm={() => handleDelete(record)}
+            okText="删除"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+          >
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={rowLoading[record.id]}
+            />
+          </Popconfirm>
+        </div>
+      ),
     },
   ]
 

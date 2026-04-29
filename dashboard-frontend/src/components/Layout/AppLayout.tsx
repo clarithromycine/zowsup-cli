@@ -53,7 +53,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     {
       key: '/login',
       icon: <RobotOutlined />,
-      label: 'Bot 登录',
+      label: 'Bot 管理',
     },
   ]
 

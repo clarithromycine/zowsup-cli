@@ -157,6 +157,19 @@ _ALL_DDL = [
 # Public API
 # ---------------------------------------------------------------------------
 
+def _migrate_profile_overrides(conn) -> None:
+    """Add manual-override and avatar columns to user_profiles if they don't exist (idempotent)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(user_profiles)").fetchall()}
+    if "user_category_override" not in existing:
+        conn.execute("ALTER TABLE user_profiles ADD COLUMN user_category_override TEXT")
+    if "communication_style_override" not in existing:
+        conn.execute("ALTER TABLE user_profiles ADD COLUMN communication_style_override TEXT")
+    if "avatar_url" not in existing:
+        conn.execute("ALTER TABLE user_profiles ADD COLUMN avatar_url TEXT")
+    if "avatar_fetched_at" not in existing:
+        conn.execute("ALTER TABLE user_profiles ADD COLUMN avatar_fetched_at INTEGER")
+
+
 def init_db(db_path: str = DB_PATH) -> None:
     """
     Create tables, indexes, and enable WAL mode.
@@ -176,6 +189,7 @@ def init_db(db_path: str = DB_PATH) -> None:
         for ddl in _ALL_DDL:
             cursor.execute(ddl)
 
+        _migrate_profile_overrides(conn)
         conn.commit()
         logger.info(f"Dashboard DB initialised at {db_path} (WAL mode)")
     except Exception:

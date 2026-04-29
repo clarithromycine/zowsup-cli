@@ -469,3 +469,308 @@ def _terminate_pid(pid: int) -> None:
 def _sse_event(event: str, data) -> str:
     payload = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
     return f"event: {event}\ndata: {payload}\n\n"
+
+
+# ---------------------------------------------------------------------------
+# Helpers: failed-account tracking
+# ---------------------------------------------------------------------------
+
+_FAILED_FILE = Path("data") / "bot_failed.json"
+
+
+def _read_failed() -> dict:
+    """Return {phone: iso_timestamp} dict."""
+    try:
+        return json.loads(_FAILED_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_failed(data: dict) -> None:
+    _FAILED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _FAILED_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def mark_phone_failed(phone: str) -> None:
+    """Record phone as permanently-failed (called from zowbot_layer on 40x)."""
+    import datetime
+    failed = _read_failed()
+    failed[phone] = datetime.datetime.utcnow().isoformat()
+    _write_failed(failed)
+
+
+# ---------------------------------------------------------------------------
+# B.8  GET /api/bot/accounts
+# ---------------------------------------------------------------------------
+
+@bot_bp.get("/accounts")
+def list_accounts():
+    """
+    Return a list of all imported bot accounts found under ACCOUNT_PATH.
+
+    Each entry:
+        phone       (str)   directory name / phone number
+        pushname    (str|null) from stored config
+        is_running  (bool)  matches current bot_status.json JID
+        is_failed   (bool)  listed in data/bot_failed.json
+        failed_at   (str|null) ISO timestamp of last failure
+    """
+    try:
+        from conf.constants import SysVar
+        SysVar.loadConfig()
+        account_path = Path(SysVar.ACCOUNT_PATH)
+    except Exception as exc:
+        logger.warning("Cannot load SysVar: %s", exc)
+        return {"error": str(exc)}, 500
+
+    status = read_status()
+    running_jid = status.get("jid") or ""
+    running_phone = running_jid.split("@")[0] if running_jid else ""
+
+    failed = _read_failed()
+
+    accounts = []
+    if account_path.exists():
+        for entry in sorted(account_path.iterdir()):
+            if not entry.is_dir():
+                continue
+            phone = entry.name
+            # Skip temp/hidden dirs
+            if phone.startswith(".") or phone == "tmp":
+                continue
+
+            pushname = None
+            try:
+                from core.config.manager import ConfigManager
+                cfg = ConfigManager().load(str(entry))
+                if cfg:
+                    pushname = getattr(cfg, "pushname", None)
+            except Exception:
+                pass
+
+            accounts.append({
+                "phone": phone,
+                "pushname": pushname,
+                "is_running": (phone == running_phone),
+                "is_failed": (phone in failed),
+                "failed_at": failed.get(phone),
+            })
+
+    return {"accounts": accounts}
+
+
+# ---------------------------------------------------------------------------
+# B.9  DELETE /api/bot/accounts/<phone>
+# ---------------------------------------------------------------------------
+
+@bot_bp.delete("/accounts/<phone>")
+@limiter.limit("20 per minute")
+def delete_account(phone: str):
+    """Permanently delete the account directory for the given phone number."""
+    import shutil
+
+    # Validate phone — digits only
+    if not phone.isdigit() or not (7 <= len(phone) <= 15):
+        return {"error": "invalid phone"}, 400
+
+    try:
+        from conf.constants import SysVar
+        SysVar.loadConfig()
+        account_path = Path(SysVar.ACCOUNT_PATH) / phone
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+
+    if not account_path.exists():
+        return {"error": "Account not found"}, 404
+
+    # Refuse if it's the currently running bot
+    status = read_status()
+    running_jid = status.get("jid") or ""
+    running_phone = running_jid.split("@")[0]
+    if status.get("running") and running_phone == phone:
+        return {"error": "Cannot delete the currently running bot — stop it first"}, 409
+
+    try:
+        shutil.rmtree(str(account_path))
+        logger.info("Deleted account directory: %s", account_path)
+    except OSError as exc:
+        return {"error": str(exc)}, 500
+
+    # Also remove from failed list
+    failed = _read_failed()
+    failed.pop(phone, None)
+    _write_failed(failed)
+
+    return {"ok": True, "phone": phone}
+
+
+# ---------------------------------------------------------------------------
+# B.10  PATCH /api/bot/accounts/<phone>/mark-failed
+# ---------------------------------------------------------------------------
+
+@bot_bp.patch("/accounts/<phone>/mark-failed")
+@limiter.limit("30 per minute")
+def toggle_mark_failed(phone: str):
+    """Toggle the failed-login mark for a given phone."""
+    if not phone.replace("+", "").isdigit() or not (7 <= len(phone.lstrip("+")) <= 15):
+        return {"error": "invalid phone"}, 400
+
+    failed = _read_failed()
+    if phone in failed:
+        failed.pop(phone)
+        is_failed = False
+    else:
+        import datetime
+        failed[phone] = datetime.datetime.utcnow().isoformat()
+        is_failed = True
+    _write_failed(failed)
+    return {"phone": phone, "is_failed": is_failed}
+
+
+# ---------------------------------------------------------------------------
+# B.11  DELETE /api/bot/accounts  (batch delete failed)
+# ---------------------------------------------------------------------------
+
+@bot_bp.delete("/accounts")
+@limiter.limit("5 per minute")
+def delete_failed_accounts():
+    """Delete all accounts marked as failed."""
+    import shutil
+
+    try:
+        from conf.constants import SysVar
+        SysVar.loadConfig()
+        account_path = Path(SysVar.ACCOUNT_PATH)
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+
+    failed = _read_failed()
+    if not failed:
+        return {"deleted": []}
+
+    status = read_status()
+    running_jid = status.get("jid") or ""
+    running_phone = running_jid.split("@")[0]
+
+    deleted, skipped = [], []
+    for phone in list(failed.keys()):
+        if status.get("running") and running_phone == phone:
+            skipped.append(phone)
+            continue
+        target = account_path / phone
+        if target.exists():
+            try:
+                shutil.rmtree(str(target))
+                deleted.append(phone)
+                failed.pop(phone)
+            except OSError as exc:
+                logger.warning("Could not delete %s: %s", target, exc)
+                skipped.append(phone)
+        else:
+            failed.pop(phone)
+            deleted.append(phone)
+
+    _write_failed(failed)
+    return {"deleted": deleted, "skipped": skipped}
+
+
+# ---------------------------------------------------------------------------
+# B.12  POST /api/bot/import
+# ---------------------------------------------------------------------------
+
+@bot_bp.post("/import")
+@limiter.limit("10 per minute")
+def import_account():
+    """
+    Import one or more 6-segment bot strings.
+
+    Request body:  {"lines": ["phone,pk1,sk1,pk2,sk2,sixth", ...]}
+    """
+    body = request.get_json(silent=True) or {}
+    lines = body.get("lines", [])
+    if not lines or not isinstance(lines, list):
+        return {"error": "lines (list) required"}, 400
+
+    script_path = _resolve_script("import6.py")
+    if not script_path.exists():
+        return {"error": "script/import6.py not found"}, 404
+
+    results = []
+    for line in lines:
+        line = str(line).strip()
+        if not line:
+            continue
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(script_path), line],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=str(Path.cwd()),
+            )
+            ok = proc.returncode == 0
+            results.append({
+                "line": line[:20] + "...",
+                "ok": ok,
+                "stdout": proc.stdout.strip()[:500] if proc.stdout else "",
+                "stderr": proc.stderr.strip()[:200] if proc.stderr else "",
+            })
+            if ok:
+                phone = line.split(",")[0] if "," in line else "?"
+                logger.info("Imported account: %s", phone)
+        except subprocess.TimeoutExpired:
+            results.append({"line": line[:20] + "...", "ok": False, "stderr": "timeout"})
+        except Exception as exc:
+            results.append({"line": line[:20] + "...", "ok": False, "stderr": str(exc)})
+
+    success = sum(1 for r in results if r["ok"])
+    return {"imported": success, "total": len(results), "results": results}
+
+
+# ---------------------------------------------------------------------------
+# B.13  POST /api/bot/export
+# ---------------------------------------------------------------------------
+
+@bot_bp.post("/export")
+@limiter.limit("10 per minute")
+def export_accounts():
+    """
+    Export 6-segment strings for given phones.
+
+    Request body:  {"phones": ["86xxxxxxxxxx", ...]}
+    Response:      {"lines": ["phone,pk1,sk1,pk2,sk2,sixth", ...]}
+    """
+    body = request.get_json(silent=True) or {}
+    phones = body.get("phones", [])
+    if not phones or not isinstance(phones, list):
+        return {"error": "phones (list) required"}, 400
+
+    script_path = _resolve_script("export6.py")
+    if not script_path.exists():
+        return {"error": "script/export6.py not found"}, 404
+
+    lines = []
+    errors = []
+    for phone in phones:
+        phone = str(phone).strip().lstrip("+")
+        if not phone.isdigit():
+            errors.append({"phone": phone, "error": "invalid phone"})
+            continue
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(script_path), phone],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=str(Path.cwd()),
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                lines.append(proc.stdout.strip())
+            else:
+                errors.append({"phone": phone, "error": proc.stderr.strip()[:200] or "no output"})
+        except subprocess.TimeoutExpired:
+            errors.append({"phone": phone, "error": "timeout"})
+        except Exception as exc:
+            errors.append({"phone": phone, "error": str(exc)})
+
+    return {"lines": lines, "errors": errors}

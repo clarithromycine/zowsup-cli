@@ -17,8 +17,10 @@ User Profile Analyzer — Phase 2 画像计算引擎
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -69,8 +71,37 @@ class UserProfileAnalyzer:
     Computes and persists user portrait data from raw chat + AI thought records.
     """
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, llm_config: Optional[Dict] = None) -> None:
         self.db_path = db_path
+        self._llm_backend = self._init_llm_backend(llm_config)
+
+    # ─────────────────────────────────────────── LLM backend bootstrap ───────
+
+    def _init_llm_backend(self, llm_config: Optional[Dict]):
+        """Instantiate the configured LLM backend, or return None if not configured."""
+        if not llm_config:
+            return None
+        backend_name = (llm_config.get("backend") or "").upper()
+        try:
+            if backend_name == "GLM":
+                from app.ai_module.backend.glm_backend import GLMBackend
+                b = GLMBackend(
+                    api_key=llm_config.get("api_key"),
+                    model=llm_config.get("model", "glm-4-plus"),
+                    auth_mode=llm_config.get("auth_mode", "apikey"),
+                )
+                return b if b.is_configured() else None
+            if backend_name == "QWEN":
+                from app.ai_module.backend.qwen_backend import QWENBackend
+                b = QWENBackend(
+                    api_key=llm_config.get("api_key"),
+                    model=llm_config.get("model", "qwen-plus"),
+                    auth_mode=llm_config.get("auth_mode", "apikey"),
+                )
+                return b if b.is_configured() else None
+        except Exception as exc:
+            logger.warning("Could not init LLM backend for topic analysis: %s", exc)
+        return None
 
     # ─────────────────────────────────────────── public interface ────────────
 
@@ -231,8 +262,84 @@ class UserProfileAnalyzer:
 
     def _compute_topic_preferences(self, jid: str) -> dict:
         """
-        Build a topic → count dict from detected_keywords in ai_thoughts.
+        Analyse topic preferences via LLM (preferred) or fall back to
+        keyword-frequency counting from ai_thoughts.
         """
+        if self._llm_backend:
+            try:
+                return self._llm_analyze_topics(jid)
+            except Exception as exc:
+                logger.warning(
+                    "LLM topic analysis failed for %s (%s), falling back to keyword count",
+                    jid, exc,
+                )
+        return self._keyword_count_topics(jid)
+
+    def _llm_analyze_topics(self, jid: str) -> dict:
+        """
+        Send recent user messages to the LLM and ask for a topic list.
+        Returns a dict mapping topic label → rank weight (10 for 1st, descending).
+        """
+        with get_db_connection(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT content
+                FROM chat_messages
+                WHERE user_jid = ? AND direction = 'in'
+                ORDER BY timestamp DESC
+                LIMIT 80
+                """,
+                (jid,),
+            ).fetchall()
+
+        if not rows:
+            return {}
+
+        # Build numbered message list (oldest first for readability)
+        lines = [f"{i+1}. {r['content']}" for i, r in enumerate(reversed(rows))]
+        history_text = "\n".join(lines)
+
+        prompt = (
+            f"以下是某用户最近发送的消息（共{len(lines)}条）：\n\n"
+            f"{history_text}\n\n"
+            "请分析上述消息，归纳该用户最关心的话题，返回一个 JSON 数组。\n"
+            "要求：\n"
+            "- 每个元素是一个简洁的中文话题词或短语（2~8字）\n"
+            "- 按重要性从高到低排序\n"
+            "- 最多返回 10 个话题\n"
+            "- 只返回 JSON 数组本身，不要任何解释或其他内容\n"
+            '示例格式：["购物优惠", "旅行计划", "技术问题"]'
+        )
+
+        # Run async backend in a fresh event loop (scheduler thread has none)
+        try:
+            loop = asyncio.new_event_loop()
+            response_text = loop.run_until_complete(
+                self._llm_backend.send_message(prompt, [], "")
+            )
+        finally:
+            loop.close()
+
+        # Extract JSON array from the response
+        match = re.search(r'\[.*?\]', response_text, re.DOTALL)
+        if not match:
+            raise ValueError(f"LLM did not return a JSON array: {response_text[:200]}")
+
+        topics: List[str] = json.loads(match.group())
+        if not isinstance(topics, list):
+            raise ValueError("LLM response is not a list")
+
+        # Convert ordered list → {topic: weight} (10 = top, decreasing by 1)
+        result: Dict[str, int] = {}
+        for i, topic in enumerate(topics[:10]):
+            topic = str(topic).strip()
+            if topic:
+                result[topic] = max(1, 10 - i)
+        logger.debug("LLM topics for %s: %s", jid, result)
+        return result
+
+    def _keyword_count_topics(self, jid: str) -> dict:
+        """Fallback: count raw keywords extracted from ai_thoughts."""
         with get_db_connection(self.db_path) as conn:
             rows = conn.execute(
                 """
@@ -256,7 +363,6 @@ class UserProfileAnalyzer:
             except (json.JSONDecodeError, TypeError):
                 continue
 
-        # Keep top-20 topics
         sorted_topics = sorted(topic_counts.items(), key=lambda x: -x[1])[:20]
         return dict(sorted_topics)
 

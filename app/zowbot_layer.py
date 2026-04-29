@@ -114,6 +114,80 @@ async def _qr_code_task(layer, interval):
     except asyncio.CancelledError:
         logger.debug("QR code task cancelled")
 
+
+async def _avatar_poll_task(layer, poll_interval: int = 15):
+    """
+    Background asyncio task that fulfils pending avatar fetch requests.
+
+    Every *poll_interval* seconds this task reads ``data/avatar_queue.json``,
+    calls ``contact.getavatar`` for each queued JID, and persists the
+    returned CDN URL into the dashboard DB via ``save_avatar_url``.
+
+    The task is started once after the bot reaches the RUNNING state and
+    runs until the asyncio event loop is stopped.
+    """
+    try:
+        from app.dashboard.utils.avatar_queue import dequeue_avatar_requests, save_avatar_url
+        from app.dashboard.config import CONFIG as DASHBOARD_CONFIG
+        db_path = DASHBOARD_CONFIG.get("DASHBOARD_DB_PATH")
+        if not db_path:
+            logger.warning("Avatar poll task: DASHBOARD_DB_PATH not configured, exiting")
+            return
+
+        logger.debug("Avatar poll task started (interval=%ds)", poll_interval)
+        while True:
+            await asyncio.sleep(poll_interval)
+            jids = dequeue_avatar_requests()
+            for jid in jids:
+                try:
+                    result = await layer.executeCommand("contact.getavatar", [jid])
+                    url = (result or {}).get("url")
+                    if url:
+                        save_avatar_url(jid, url, db_path)
+                        logger.debug("Avatar cached for %s", jid)
+                    else:
+                        logger.debug("No avatar URL returned for %s (result=%s)", jid, result)
+                except Exception as e:
+                    logger.debug("Avatar fetch failed for %s: %s", jid, e)
+    except asyncio.CancelledError:
+        logger.debug("Avatar poll task cancelled")
+
+
+    """Asyncio task replacing YowQrCodeThread."""
+    try:
+        while True:
+            refs = layer.getProp("refs")
+            if len(refs) > 0:
+                ref = refs.pop(0)
+                regInfo = layer.getProp("reg_info")
+                keypair = regInfo["keypair"]
+                identity = regInfo["identity"]
+                advSecretKey = random.randbytes(32)
+                logger.debug("{},{},{},{}".format(
+                    str(ref, "utf8"),
+                    str(base64.b64encode(keypair.public.data), "utf8"),
+                    str(base64.b64encode(identity.publicKey.serialize()[1:]), "utf8"),
+                    str(base64.b64encode(advSecretKey), "utf8")
+                ))
+                qr = qrcode.QRCode()
+                qr.border = 1
+                qr.add_data("{},{},{},{}".format(
+                    str(ref, "utf8"),
+                    str(base64.b64encode(keypair.public.data), "utf8"),
+                    str(base64.b64encode(identity.publicKey.serialize()[1:]), "utf8"),
+                    str(base64.b64encode(advSecretKey), "utf8")
+                ))
+                qr.make()
+                qr.print_ascii(out=None, tty=False, invert=False)
+                layer.setProp("refs", refs)
+            else:
+                await layer.getStack().broadcastEvent(YowLayerEvent(YowNetworkLayer.EVENT_STATE_DISCONNECT))
+                return
+            for i in range(0, interval):
+                await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        logger.debug("QR code task cancelled")
+
 class ZowBotLayer(YowInterfaceLayer):
 
     PROP_MESSAGES = "org.openwhatsapp.zowsup.prop.sendclient.queue"
@@ -137,6 +211,7 @@ class ZowBotLayer(YowInterfaceLayer):
         self.pingCount = 0             
         self.ctxMap = {}
         self._qrTask = None
+        self._avatarTask = None
         self.loginFailCount = 0
         self.pairingStatus = None
         
@@ -573,6 +648,23 @@ class ZowBotLayer(YowInterfaceLayer):
                         "value":entity.setId
                     }
                 })
+                # Proactively re-fetch and cache the new avatar in the dashboard DB
+                async def _refresh_avatar(jid: str) -> None:
+                    try:
+                        from app.dashboard.utils.avatar_queue import save_avatar_url, notify_avatar_updated
+                        from app.dashboard.config import CONFIG as DASHBOARD_CONFIG
+                        db_path = DASHBOARD_CONFIG.get("DASHBOARD_DB_PATH")
+                        if not db_path:
+                            return
+                        result = await self.executeCommand("contact.getavatar", [jid])
+                        url = (result or {}).get("url")
+                        if url:
+                            save_avatar_url(jid, url, db_path)
+                            notify_avatar_updated(jid, url)
+                            self.logger.debug("Avatar refreshed for %s after SetPicture notification", jid)
+                    except Exception as _exc:
+                        self.logger.debug("Avatar refresh failed for %s: %s", jid, _exc)
+                asyncio.ensure_future(_refresh_avatar(entity.setJid))
             return      
 
         if isinstance(entity,BusinessNameUpdateNotificationProtocolEntity):
@@ -719,8 +811,23 @@ class ZowBotLayer(YowInterfaceLayer):
 
             self.detect40x = True            
 
-            if entity.reason!="405" and self.bot.bot_type!=ZowBotType.TYPE_RUN_TEMP:
-                pass                
+            if entity.reason != "405" and self.bot.bot_type != ZowBotType.TYPE_RUN_TEMP:
+                # Permanent ban / unauthorized — mark offline immediately so the
+                # dashboard doesn't keep showing the bot as running.
+                try:
+                    from app.dashboard.utils.bot_status import clear_status
+                    clear_status()
+                except Exception:
+                    pass
+                # Record this account as permanently failed in the dashboard.
+                try:
+                    from app.dashboard.api.bot_control import mark_phone_failed
+                    if self.bot.botId:
+                        mark_phone_failed(self.bot.botId)
+                except Exception:
+                    pass
+                # Quit the bot process now; no point staying connected.
+                self.bot.quit()
 
             self.loginEvent.set()        
 
@@ -851,6 +958,14 @@ class ZowBotLayer(YowInterfaceLayer):
         await self.toLower(entity)         
         self.bot.status = ZowBotStatus.STATUS_RUNNING   
 
+        # Start avatar polling background task (dashboard IPC)
+        if self._avatarTask is None or self._avatarTask.done():
+            try:
+                loop = asyncio.get_event_loop()
+                self._avatarTask = loop.create_task(_avatar_poll_task(self))
+                self.logger.debug("Avatar poll task scheduled")
+            except Exception as exc:
+                self.logger.debug("Could not schedule avatar poll task: %s", exc)
 
         self.bot.lastOnlineTime = int(time.time()) 
 

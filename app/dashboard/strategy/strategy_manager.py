@@ -239,41 +239,60 @@ class StrategyManager:
         """
         Deactivate the currently active version, reactivate the previous one.
         If user_jid is None, operates on the global strategy.
-        Returns True if a previous version was found and reactivated.
+        Returns True if there was an active strategy to roll back from.
+        When no previous version exists, the active strategy is simply deactivated
+        (rolls back to "no strategy" state).
         """
         with self._conn() as conn:
             if user_jid:
-                rows = conn.execute(
+                current = conn.execute(
                     "SELECT id, version FROM strategy_applications "
-                    "WHERE user_jid=? AND strategy_type='personal' "
-                    "ORDER BY version DESC LIMIT 2",
+                    "WHERE user_jid=? AND strategy_type='personal' AND is_active=1 "
+                    "ORDER BY version DESC LIMIT 1",
                     (user_jid,),
-                ).fetchall()
+                ).fetchone()
             else:
-                rows = conn.execute(
+                current = conn.execute(
                     "SELECT id, version FROM strategy_applications "
-                    "WHERE user_jid IS NULL AND strategy_type='global' "
-                    "ORDER BY version DESC LIMIT 2",
-                ).fetchall()
+                    "WHERE user_jid IS NULL AND strategy_type='global' AND is_active=1 "
+                    "ORDER BY version DESC LIMIT 1",
+                ).fetchone()
 
-            if len(rows) < 2:
-                return False
+            if not current:
+                return False  # nothing active to roll back from
 
-            current_id = rows[0]["id"]
-            prev_id = rows[1]["id"]
+            # Find the previous version (highest version strictly below current)
+            if user_jid:
+                prev = conn.execute(
+                    "SELECT id, version FROM strategy_applications "
+                    "WHERE user_jid=? AND strategy_type='personal' AND version < ? "
+                    "ORDER BY version DESC LIMIT 1",
+                    (user_jid, current["version"]),
+                ).fetchone()
+            else:
+                prev = conn.execute(
+                    "SELECT id, version FROM strategy_applications "
+                    "WHERE user_jid IS NULL AND strategy_type='global' AND version < ? "
+                    "ORDER BY version DESC LIMIT 1",
+                    (current["version"],),
+                ).fetchone()
+
             conn.execute(
                 "UPDATE strategy_applications SET is_active=0 WHERE id=?",
-                (current_id,),
+                (current["id"],),
             )
-            conn.execute(
-                "UPDATE strategy_applications SET is_active=1 WHERE id=?",
-                (prev_id,),
-            )
+            if prev:
+                conn.execute(
+                    "UPDATE strategy_applications SET is_active=1 WHERE id=?",
+                    (prev["id"],),
+                )
             conn.commit()
 
         logger.info(
-            "Strategy rolled back for %s",
+            "Strategy rolled back for %s (from v%d to %s)",
             "global" if user_jid is None else user_jid,
+            current["version"],
+            f"v{prev['version']}" if prev else "none",
         )
         return True
 
@@ -310,6 +329,71 @@ class StrategyManager:
             del d["config_json"]
             result.append(d)
         return result
+
+    # ------------------------------------------------------------------
+    # 4.5b  Toggle / delete individual rows
+    # ------------------------------------------------------------------
+
+    def toggle_strategy(self, strategy_id: int) -> dict:
+        """
+        Toggle is_active for a single strategy row.
+        When activating: deactivate any other active row of the same type/jid
+        so there is at most one active row per scope.
+        Returns {'id': ..., 'is_active': new_value}.
+        Raises ValueError if strategy_id not found.
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT id, user_jid, strategy_type, is_active "
+                "FROM strategy_applications WHERE id=?",
+                (strategy_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Strategy id={strategy_id} not found")
+
+            new_active = 0 if row["is_active"] else 1
+
+            if new_active == 1:
+                # Deactivate any currently active row of the same scope
+                if row["user_jid"] is None:
+                    conn.execute(
+                        "UPDATE strategy_applications SET is_active=0 "
+                        "WHERE user_jid IS NULL AND strategy_type=? AND is_active=1",
+                        (row["strategy_type"],),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE strategy_applications SET is_active=0 "
+                        "WHERE user_jid=? AND strategy_type=? AND is_active=1",
+                        (row["user_jid"], row["strategy_type"]),
+                    )
+
+            conn.execute(
+                "UPDATE strategy_applications SET is_active=? WHERE id=?",
+                (new_active, strategy_id),
+            )
+            conn.commit()
+
+        logger.info(
+            "Strategy id=%d toggled to is_active=%d", strategy_id, new_active
+        )
+        return {"id": strategy_id, "is_active": new_active}
+
+    def delete_strategy(self, strategy_id: int) -> bool:
+        """
+        Permanently delete a strategy row.
+        Returns True if a row was deleted, False if not found.
+        """
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM strategy_applications WHERE id=?",
+                (strategy_id,),
+            )
+            conn.commit()
+        deleted = cursor.rowcount > 0
+        if deleted:
+            logger.info("Strategy id=%d deleted", strategy_id)
+        return deleted
 
     # ------------------------------------------------------------------
     # 4.6 / 4.7  Conflict detection

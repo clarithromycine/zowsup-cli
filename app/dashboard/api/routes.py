@@ -95,7 +95,8 @@ def contacts():
                 cm.user_jid,
                 cm.content        AS last_message,
                 cm.timestamp      AS last_timestamp,
-                agg.message_count
+                agg.message_count,
+                up.avatar_url
             FROM chat_messages cm
             INNER JOIN (
                 SELECT user_jid,
@@ -105,15 +106,77 @@ def contacts():
                 GROUP  BY user_jid
             ) agg ON cm.user_jid = agg.user_jid
                   AND cm.timestamp = agg.max_ts
+            LEFT JOIN user_profiles up ON up.user_jid = cm.user_jid
             GROUP  BY cm.user_jid
             ORDER  BY last_timestamp DESC
             """
         ).fetchall()
-    return jsonify({"contacts": [dict(r) for r in rows]}), 200
+
+    contacts = [dict(r) for r in rows]
+
+    # Enqueue avatar fetch for contacts whose avatar is missing or stale
+    try:
+        from app.dashboard.utils.avatar_queue import enqueue_avatar_request, is_avatar_stale
+        for c in contacts:
+            if not c.get("avatar_url") or is_avatar_stale(c["user_jid"], db_path):
+                enqueue_avatar_request(c["user_jid"])
+    except Exception:
+        logger.debug("Avatar queue enqueue failed (non-fatal)", exc_info=True)
+
+    return jsonify({"contacts": contacts}), 200
+
+
+# ---------------------------------------------------------------------------
+# GET  /api/contact/avatar?jid=<jid>
+# POST /api/contact/avatar/refresh    body: {"jid": "..."}
+# ---------------------------------------------------------------------------
+
+@bp.route("/contact/avatar", methods=["GET"])
+def get_contact_avatar():
+    """Return the cached avatar URL for a single JID."""
+    jid = request.args.get("jid", "").strip()
+    if not jid:
+        return jsonify({"error": "jid parameter is required"}), 400
+
+    db_path = current_app.config["DASHBOARD_DB_PATH"]
+    with get_db_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT avatar_url, avatar_fetched_at FROM user_profiles WHERE user_jid = ?",
+            (jid,),
+        ).fetchone()
+
+    if row:
+        return jsonify({"jid": jid, "avatar_url": row[0], "fetched_at": row[1]}), 200
+    return jsonify({"jid": jid, "avatar_url": None, "fetched_at": None}), 200
+
+
+@bp.route("/contact/avatar/refresh", methods=["POST"])
+@limiter.limit("30 per minute")
+def post_contact_avatar_refresh():
+    """
+    Force-enqueue a fresh avatar fetch for the given JID.
+
+    Body JSON:  {"jid": "989334018988@s.whatsapp.net"}
+    Response:   {"ok": true, "jid": "..."}
+    """
+    body = request.get_json(silent=True) or {}
+    jid = (body.get("jid") or "").strip()
+    if not jid:
+        return jsonify({"error": "jid is required"}), 400
+
+    try:
+        from app.dashboard.utils.avatar_queue import enqueue_avatar_request
+        enqueue_avatar_request(jid)
+    except Exception as exc:
+        logger.warning("Avatar enqueue failed for %s: %s", jid, exc)
+        return jsonify({"error": "Failed to enqueue avatar refresh"}), 500
+
+    return jsonify({"ok": True, "jid": jid}), 200
 
 
 # ---------------------------------------------------------------------------
 # 1.11  GET /api/user-profile?jid=<jid>
+#        PATCH /api/user-profile  — manually override category / style
 # ---------------------------------------------------------------------------
 
 @bp.route("/user-profile", methods=["GET"])
@@ -139,10 +202,81 @@ def user_profile():
         ).fetchone()
 
     if row is None:
-        # Return empty-but-typed structure so the frontend schema is stable
         return jsonify(_empty_profile(jid)), 200
 
-    return jsonify(dict(row)), 200
+    profile = dict(row)
+
+    # Deserialize TEXT JSON columns stored in SQLite
+    import json as _json
+    for _col in ("topic_preferences", "trend_7d", "trend_30d", "current_strategy"):
+        raw = profile.get(_col)
+        if isinstance(raw, str):
+            try:
+                profile[_col] = _json.loads(raw)
+            except (ValueError, TypeError):
+                profile[_col] = None
+
+    # Prefer manually set overrides over auto-inferred values
+    cat_override   = profile.pop("user_category_override", None)
+    style_override = profile.pop("communication_style_override", None)
+    if cat_override:
+        profile["user_category"]         = cat_override
+        profile["user_category_is_manual"] = True
+    else:
+        profile["user_category_is_manual"] = False
+    if style_override:
+        profile["communication_style"]         = style_override
+        profile["communication_style_is_manual"] = True
+    else:
+        profile["communication_style_is_manual"] = False
+    return jsonify(profile), 200
+
+
+@bp.route("/user-profile", methods=["PATCH"])
+def patch_user_profile():
+    """
+    Manually override user_category and/or communication_style for a JID.
+
+    Body JSON:
+        jid                   (required)
+        user_category         (optional)  null clears the override
+        communication_style   (optional)  null clears the override
+    """
+    body = request.get_json(silent=True) or {}
+    jid = (body.get("jid") or "").strip()
+    if not jid:
+        return jsonify({"error": "jid is required"}), 400
+
+    allowed_categories = {"VIP", "regular", "new", "at_risk"}
+    allowed_styles     = {"detailed", "concise", "patient", "impatient"}
+
+    cat   = body.get("user_category",       ...)   # Ellipsis = "not provided"
+    style = body.get("communication_style", ...)
+
+    if cat is not ... and cat is not None and cat not in allowed_categories:
+        return jsonify({"error": f"Invalid user_category: {cat}"}), 400
+    if style is not ... and style is not None and style not in allowed_styles:
+        return jsonify({"error": f"Invalid communication_style: {style}"}), 400
+
+    db_path = current_app.config["DASHBOARD_DB_PATH"]
+    with get_db_connection(db_path) as conn:
+        # Ensure a row exists so UPDATE won't silently no-op
+        conn.execute(
+            "INSERT OR IGNORE INTO user_profiles (user_jid) VALUES (?)", (jid,)
+        )
+        if cat is not ...:
+            conn.execute(
+                "UPDATE user_profiles SET user_category_override = ? WHERE user_jid = ?",
+                (cat, jid),
+            )
+        if style is not ...:
+            conn.execute(
+                "UPDATE user_profiles SET communication_style_override = ? WHERE user_jid = ?",
+                (style, jid),
+            )
+        conn.commit()
+
+    return jsonify({"ok": True, "jid": jid}), 200
 
 
 def _empty_profile(jid: str) -> dict:
@@ -152,7 +286,9 @@ def _empty_profile(jid: str) -> dict:
         "first_seen": None,
         "last_seen": None,
         "user_category": None,
+        "user_category_is_manual": False,
         "communication_style": None,
+        "communication_style_is_manual": False,
         "topic_preferences": {},
         "satisfaction_score": None,
         "trend_7d": {"dates": [], "counts": []},
@@ -561,9 +697,45 @@ def strategy_rollback():
         return jsonify({"success": True, "jid": jid}), 200
     return jsonify({
         "success": False,
-        "message": "No previous strategy version found to roll back to",
+        "message": "No active strategy found to roll back",
         "jid": jid,
     }), 409
+
+
+@bp.route("/strategy/<int:strategy_id>/toggle", methods=["PATCH"])
+@limiter.limit("30/minute")
+def toggle_strategy(strategy_id: int):
+    """
+    Toggle is_active for a strategy row.
+    When activating: deactivate other active rows of the same scope automatically.
+    Returns: {id, is_active}
+    """
+    db_path = current_app.config["DASHBOARD_DB_PATH"]
+    try:
+        sm = _get_strategy_manager(db_path)
+        result = sm.toggle_strategy(strategy_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logger.exception("toggle_strategy failed")
+        return jsonify({"error": str(e)}), 500
+    return jsonify(result), 200
+
+
+@bp.route("/strategy/<int:strategy_id>", methods=["DELETE"])
+@limiter.limit("20/minute")
+def delete_strategy_row(strategy_id: int):
+    """Permanently delete a strategy history row."""
+    db_path = current_app.config["DASHBOARD_DB_PATH"]
+    try:
+        sm = _get_strategy_manager(db_path)
+        deleted = sm.delete_strategy(strategy_id)
+    except Exception as e:
+        logger.exception("delete_strategy failed")
+        return jsonify({"error": str(e)}), 500
+    if not deleted:
+        return jsonify({"error": "Strategy not found"}), 404
+    return jsonify({"success": True, "id": strategy_id}), 200
 
 
 @bp.route("/strategy/conflicts", methods=["GET"])

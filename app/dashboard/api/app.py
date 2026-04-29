@@ -114,12 +114,38 @@ def create_app(db_path: str | None = None) -> Flask:
     return app
 
 
+def _read_llm_config() -> dict:
+    """Read LLM backend config from conf/config.conf for profile analysis."""
+    import configparser
+    from pathlib import Path
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    config_path = project_root / "conf" / "config.conf"
+    conf = configparser.ConfigParser()
+    if not config_path.exists():
+        return {}
+    conf.read(config_path)
+    if not conf.getboolean("AI_LLM_ACTIVE", "enabled", fallback=False):
+        return {}
+    backend = conf.get("AI_LLM_ACTIVE", "backend", fallback="").upper()
+    section = f"AI_LLM_{backend}"
+    if section not in conf:
+        return {}
+    return {
+        "backend": backend,
+        "api_key": conf.get(section, "api_key", fallback=""),
+        "model": conf.get(section, "model", fallback=""),
+        "auth_mode": conf.get(section, "auth_mode", fallback="apikey"),
+    }
+
+
 def _start_profile_scheduler(app: Flask, db_path: str) -> None:
     """Start an APScheduler background job for user profile computation."""
     import os
     # Skip scheduler in test environments
     if os.environ.get("TESTING") or os.environ.get("PYTEST_CURRENT_TEST"):
         return
+
+    llm_config = _read_llm_config()
 
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -129,7 +155,7 @@ def _start_profile_scheduler(app: Flask, db_path: str) -> None:
 
         def _run_profile_update():
             try:
-                analyzer = UserProfileAnalyzer(db_path)
+                analyzer = UserProfileAnalyzer(db_path, llm_config=llm_config)
                 n = analyzer.update_all_profiles()
                 if n:
                     logging.getLogger("dashboard.scheduler").info(

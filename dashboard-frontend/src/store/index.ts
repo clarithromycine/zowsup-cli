@@ -17,6 +17,7 @@ interface ContactEntry {
   last_message: string | null
   last_timestamp: number | null
   unread: number
+  avatar_url?: string | null
 }
 
 interface DashboardState {
@@ -61,6 +62,7 @@ interface DashboardActions {
   setWsConnected: (v: boolean) => void
 
   setContacts: (contacts: ContactEntry[]) => void
+  updateContactAvatar: (jid: string, avatar_url: string | null) => void
   selectJid: (jid: string | null) => void
   incrementUnread: (jid: string) => void
   clearUnread: (jid: string) => void
@@ -138,6 +140,12 @@ export const useDashboardStore = create<StoreState>()(
     setContacts: (contacts) =>
       set((s) => {
         s.contacts = contacts
+      }),
+
+    updateContactAvatar: (jid, avatar_url) =>
+      set((s) => {
+        const c = s.contacts.find((x: ContactEntry) => x.jid === jid)
+        if (c) c.avatar_url = avatar_url
       }),
 
     selectJid: (jid) =>

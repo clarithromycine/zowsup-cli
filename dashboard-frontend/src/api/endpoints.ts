@@ -24,6 +24,7 @@ export interface ContactSummary {
   last_message: string | null
   last_timestamp: number | null
   message_count: number
+  avatar_url: string | null
 }
 
 export async function fetchContacts(): Promise<ContactSummary[]> {
@@ -31,11 +32,29 @@ export async function fetchContacts(): Promise<ContactSummary[]> {
   return data.contacts as ContactSummary[]
 }
 
+export async function fetchContactAvatar(
+  jid: string,
+): Promise<{ jid: string; avatar_url: string | null; fetched_at: number | null }> {
+  const { data } = await apiClient.get('/contact/avatar', { params: { jid } })
+  return data
+}
+
+export async function refreshContactAvatar(jid: string): Promise<void> {
+  await apiClient.post('/contact/avatar/refresh', { jid })
+}
+
 // ---- User Profile ----
 
 export async function fetchUserProfile(jid: string): Promise<UserProfile> {
   const { data } = await apiClient.get('/user-profile', { params: { jid } })
   return data
+}
+
+export async function patchUserProfile(
+  jid: string,
+  overrides: { user_category?: string | null; communication_style?: string | null },
+): Promise<void> {
+  await apiClient.patch('/user-profile', { jid, ...overrides })
 }
 
 // ---- Chat History ----
@@ -108,6 +127,15 @@ export async function postRollbackStrategy(
   return data
 }
 
+export async function patchToggleStrategy(id: number): Promise<{ id: number; is_active: 0 | 1 }> {
+  const { data } = await apiClient.patch(`/strategy/${id}/toggle`)
+  return data
+}
+
+export async function deleteStrategyRow(id: number): Promise<void> {
+  await apiClient.delete(`/strategy/${id}`)
+}
+
 export async function fetchStrategyConflicts(jid: string): Promise<StrategyConflictsResponse> {
   const { data } = await apiClient.get('/strategy/conflicts', { params: { jid } })
   return data
@@ -149,5 +177,58 @@ export async function postBotStart(
   phone: string,
 ): Promise<{ ok: boolean; pid: number }> {
   const { data } = await apiClient.post('/bot/start', { phone })
+  return data
+}
+
+// ---- Bot Account Management ----
+
+export interface BotAccount {
+  phone: string
+  pushname: string | null
+  is_running: boolean
+  is_failed: boolean
+  failed_at: string | null
+}
+
+export interface ImportResult {
+  line: string
+  ok: boolean
+  stdout: string
+  stderr: string
+}
+
+export async function fetchBotAccounts(): Promise<{ accounts: BotAccount[] }> {
+  const { data } = await apiClient.get('/bot/accounts')
+  return data
+}
+
+export async function deleteBotAccount(phone: string): Promise<{ ok: boolean; phone: string }> {
+  const { data } = await apiClient.delete(`/bot/accounts/${phone}`)
+  return data
+}
+
+export async function patchToggleAccountFailed(
+  phone: string,
+): Promise<{ phone: string; is_failed: boolean }> {
+  const { data } = await apiClient.patch(`/bot/accounts/${phone}/mark-failed`)
+  return data
+}
+
+export async function deleteFailedAccounts(): Promise<{ deleted: string[]; skipped: string[] }> {
+  const { data } = await apiClient.delete('/bot/accounts')
+  return data
+}
+
+export async function importBotAccounts(
+  lines: string[],
+): Promise<{ imported: number; total: number; results: ImportResult[] }> {
+  const { data } = await apiClient.post('/bot/import', { lines })
+  return data
+}
+
+export async function exportBotAccounts(
+  phones: string[],
+): Promise<{ lines: string[]; errors: { phone: string; error: string }[] }> {
+  const { data } = await apiClient.post('/bot/export', { phones })
   return data
 }

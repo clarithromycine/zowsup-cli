@@ -19,6 +19,7 @@ export function useWebSocket(): void {
   const setCurrentStrategy = useDashboardStore((s) => s.setCurrentStrategy)
   const setGlobalStrategy = useDashboardStore((s) => s.setGlobalStrategy)
   const incrementUnread = useDashboardStore((s) => s.incrementUnread)
+  const updateContactAvatar = useDashboardStore((s) => s.updateContactAvatar)
 
   // Connect once on mount
   useEffect(() => {
@@ -64,6 +65,10 @@ export function useWebSocket(): void {
           setCurrentStrategy(payload.strategy)
         }
       }
+    })
+
+    socket.on('avatar_updated', (payload: { jid: string; avatar_url: string }) => {
+      updateContactAvatar(payload.jid, payload.avatar_url)
     })
 
     return () => {

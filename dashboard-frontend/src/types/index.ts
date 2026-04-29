@@ -33,7 +33,9 @@ export interface UserProfile {
   first_seen: string | null
   last_seen: string | null
   user_category: string | null
+  user_category_is_manual: boolean
   communication_style: string | null
+  communication_style_is_manual: boolean
   topic_preferences: Record<string, number>
   satisfaction_score: number | null
   trend_7d: TrendData | null

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { List, Input, Badge, Avatar, Typography, Spin, Empty } from 'antd'
 import { UserOutlined, SearchOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { fetchChatHistory, fetchContacts } from '../../api/endpoints'
+import { fetchChatHistory, fetchContacts, fetchContactAvatar, refreshContactAvatar } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
 
 const { Text } = Typography
@@ -26,6 +26,7 @@ const ContactList: React.FC = () => {
   const selectedJid = useDashboardStore((s) => s.selectedJid)
   const selectJid = useDashboardStore((s) => s.selectJid)
   const setContacts = useDashboardStore((s) => s.setContacts)
+  const updateContactAvatar = useDashboardStore((s) => s.updateContactAvatar)
   const setMessages = useDashboardStore((s) => s.setMessages)
   const setMessagesLoading = useDashboardStore((s) => s.setMessagesLoading)
   const clearUnread = useDashboardStore((s) => s.clearUnread)
@@ -48,6 +49,7 @@ const ContactList: React.FC = () => {
               last_message: c.last_message,
               last_timestamp: c.last_timestamp,
               unread: 0,
+              avatar_url: c.avatar_url ?? null,
             })),
           )
         }
@@ -76,6 +78,20 @@ const ContactList: React.FC = () => {
     } finally {
       setMessagesLoading(false)
     }
+
+    // Refresh avatar for this contact once in the background
+    refreshContactAvatar(jid).catch(() => null)
+    // Poll for the updated URL at 4 s, 10 s, 20 s after enqueue
+    const delays = [4000, 10000, 20000]
+    delays.forEach((ms) => {
+      setTimeout(() => {
+        fetchContactAvatar(jid)
+          .then(({ avatar_url }) => {
+            if (avatar_url) updateContactAvatar(jid, avatar_url)
+          })
+          .catch(() => null)
+      }, ms)
+    })
   }
 
   return (
@@ -113,7 +129,11 @@ const ContactList: React.FC = () => {
               <List.Item.Meta
                 avatar={
                   <Badge count={contact.unread} size="small">
-                    <Avatar icon={<UserOutlined />} size={36} />
+                    <Avatar
+                      src={contact.avatar_url ?? undefined}
+                      icon={<UserOutlined />}
+                      size={36}
+                    />
                   </Badge>
                 }
                 title={

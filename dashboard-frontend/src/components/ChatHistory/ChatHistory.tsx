@@ -126,6 +126,13 @@ const ChatHistory: React.FC = () => {
       <div
         ref={scrollRef}
         style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', transform: 'scaleY(-1)' }}
+        onWheel={(e) => {
+          // scaleY(-1) flips the visual axis but not the scroll axis, so the
+          // wheel direction feels inverted. Intercept and reverse it manually.
+          e.preventDefault()
+          const el = e.currentTarget
+          el.scrollTop -= e.deltaY
+        }}
       >
         {messages.map((msg) => (
           <div key={msg.id} style={{ transform: 'scaleY(-1)' }}>
