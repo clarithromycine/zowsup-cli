@@ -229,6 +229,10 @@ The integrated AI module provides:
 zowsup-cli/
 ├── app/                 # Main application layer (async)
 │   ├── ai_module/      # AI/ML integration
+│   ├── dashboard/      # Flask dashboard backend
+│   │   ├── api/        # REST API blueprints (bot, strategy, contacts…)
+│   │   ├── strategy/   # Strategy engine & manager
+│   │   └── utils/      # bot_status, avatar_queue helpers
 │   ├── zowbot.py       # Core bot engine (async)
 │   └── zowbot_cmd/     # Command handlers
 ├── core/               # Protocol layer (async)
@@ -242,10 +246,76 @@ zowsup-cli/
 ├── proto/              # Protobuf definitions
 ├── script/             # CLI entry points
 ├── conf/               # Configuration files
+├── dashboard-frontend/ # React 18 + Vite dashboard UI
 └── common/             # Shared utilities
 ```
 
-## 💬 Community & Support
+## 🖥️ Web Dashboard
+
+A full-stack monitoring and management dashboard ships alongside the CLI.
+
+**Stack:** Flask 3 + Flask-SocketIO (backend) · React 18 + Vite + Ant Design v5 (frontend)
+
+### Starting the dashboard
+
+```bash
+# Backend (port 5000)
+python run_dashboard.py
+
+# Frontend dev server (port 5173, proxies /api → 5000)
+cd dashboard-frontend && npm run dev
+```
+
+### Features
+
+#### Dashboard
+- Real-time contact list with avatars, unread badges, and last-message previews
+- Live chat history per contact with inverted-list scroll (newest at bottom, no jump)
+- Per-user AI "thoughts" panel showing the model's reasoning chain
+- Global statistics panel (message count, active users, etc.)
+- WebSocket push + SSE for zero-poll live updates
+
+#### Strategy Management
+- Apply a global AI reply strategy or per-user overrides
+- Full history table with **is_active** status column, one-click toggle, and row delete
+- Per-user strategy history embedded inside the user-profile modal
+- One-click rollback to the previous active strategy
+
+#### Bot Management
+Replaced the old single-purpose login page with a comprehensive management interface:
+
+**Account List**
+- Displays all imported bot accounts found under `ACCOUNT_PATH`
+- Shows phone number, push-name, and live status (Running / Offline / Login Failed)
+- **One-click start** — launches the bot and streams startup logs in a modal
+- **Mark Failed / Unmark** — manually tag an account as login-failed (auto-tagged on 403/401 permanent ban)
+- **Batch delete failed accounts** — removes all failure-marked account directories in one click
+- **Import** — paste one or more 6-segment strings; runs `script/import6.py` per line
+- **Export** — select accounts and export 6-segment backup strings via `script/export6.py`; copyable modal output
+- Row checkboxes for bulk export
+
+**Login Tabs**  *(unchanged)*
+- Start registered bot — start a registered phone with live SSE log stream
+- QR-code login — scan QR code (SSE stream)
+- Link-code login — 8-character link-code login
+
+**Failure tracking**  
+Permanent login failures (HTTP 403/401/405) are automatically recorded in `data/bot_failed.json` by `zowbot_layer.onFailure()`.
+
+### API reference (selected endpoints)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/bot/accounts` | List all imported accounts with status |
+| `DELETE` | `/api/bot/accounts/<phone>` | Delete account directory |
+| `PATCH` | `/api/bot/accounts/<phone>/mark-failed` | Toggle failed mark |
+| `DELETE` | `/api/bot/accounts` | Batch-delete all failed accounts |
+| `POST` | `/api/bot/import` | Import 6-segment strings |
+| `POST` | `/api/bot/export` | Export 6-segment strings |
+| `PATCH` | `/api/strategy/<id>/toggle` | Toggle strategy is_active |
+| `DELETE` | `/api/strategy/<id>` | Delete a strategy row |
+
+
 
 **Discussion & Support:**
 - Telegram: [Zowsup Community](https://t.me/+au1dTQz7jyU0YjU5)
@@ -257,7 +327,16 @@ zowsup-cli/
 
 ## 🔄 Changelog
 
-### v0.8.0 (Latest release at 2026.04.23)
+### v0.9.0 (2026.04.29)
+- **Bot Management page redesign**: upgraded from a single login page to a full management interface with account list, one-click start, import/export, failure marking, and batch delete
+- **6-segment import/export API**: backend `/api/bot/import` and `/api/bot/export` directly invoke `script/import6.py` / `script/export6.py`
+- **Auto-mark on login failure**: `zowbot_layer.onFailure()` writes to `data/bot_failed.json` on permanent ban (403/401)
+- **Strategy history table**: added `is_active` status column, per-row toggle/delete actions, and per-user strategy history embedded in the user-profile modal
+- **Strategy rollback fix**: `rollback_strategy()` no longer returns 409 when only a single record exists
+- **Chat history scroll fix**: mouse wheel direction corrected for the `scaleY(-1)` inverted container via `onWheel` interception
+- **`_avatar_poll_task` crash fix**: removed the duplicate `_qr_code_task` code block mistakenly embedded inside `_avatar_poll_task`, eliminating `TypeError: NoneType has no len()`
+
+### v0.8.0 (2026.04.23)
 - Full AsyncIO implementation across all layers
 - Enhanced prompt system with AI validation
 - Improved error messages and recovery
