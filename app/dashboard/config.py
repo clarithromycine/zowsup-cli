@@ -20,7 +20,7 @@ def _load_config() -> dict:
 
     conf = configparser.ConfigParser()
     if config_path.exists():
-        conf.read(config_path)
+        conf.read(config_path, encoding='utf-8')
 
     account_path = conf.get("SysVar", "ACCOUNT_PATH", fallback="/data/account/")
 

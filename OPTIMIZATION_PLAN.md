@@ -31,7 +31,7 @@
 
 ---
 
-## Phase 2 — 上下文轮数可配置 ⬜ PENDING
+## Phase 2 — 上下文轮数可配置 ✅ DONE
 
 **目标**：把 hardcode 的 `[-10:]` / `days=3` 改为从 Strategy 配置读取。
 
@@ -50,7 +50,7 @@
 
 ---
 
-## Phase 3 — 紧急程度标签 + 意图→策略自动匹配 ⬜ PENDING
+## Phase 3 — 紧急程度标签 + 意图→策略自动匹配 ✅ DONE
 
 **目标**：将 intent 检测反馈回策略；新增 urgency_level 标签。
 
@@ -70,7 +70,7 @@
 
 ---
 
-## Phase 4 — 长期用户画像自动积累 ⬜ PENDING
+## Phase 4 — 长期用户画像自动积累 ✅ DONE
 
 **目标**：从每轮 ai_thoughts 自动归纳用户偏好，写入 user_profiles，不依赖二次 LLM 调用。
 
@@ -97,6 +97,6 @@
 | Phase | 描述 | 难度 | 用户价值 | 状态 |
 |---|---|---|---|---|
 | 1 | 满意度收集 | 低 | 高 | ✅ DONE |
-| 2 | 上下文轮数可配置 | 低 | 中 | ⬜ PENDING |
-| 3 | 意图→策略自动匹配 + urgency | 中 | 高 | ⬜ PENDING |
-| 4 | 用户画像自动积累 | 中 | 中 | ⬜ PENDING |
+| 2 | 上下文轮数可配置 | 低 | 中 | ✅ DONE |
+| 3 | 意图→策略自动匹配 + urgency | 中 | 高 | ✅ DONE |
+| 4 | 用户画像自动积累 | 中 | 中 | ✅ DONE |

@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS ai_thoughts (
     tone                    TEXT,
     response_quality_score  REAL,
     raw_thought             TEXT,               -- full reasoning text if available
+    urgency_level           TEXT,               -- 'high' / 'medium' / 'low' (Phase 3)
     created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -157,6 +158,13 @@ _ALL_DDL = [
 # Public API
 # ---------------------------------------------------------------------------
 
+def _migrate_ai_thoughts_urgency(conn) -> None:
+    """Add urgency_level column to ai_thoughts if it doesn't exist (idempotent)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(ai_thoughts)").fetchall()}
+    if "urgency_level" not in existing:
+        conn.execute("ALTER TABLE ai_thoughts ADD COLUMN urgency_level TEXT")
+
+
 def _migrate_profile_overrides(conn) -> None:
     """Add manual-override and avatar columns to user_profiles if they don't exist (idempotent)."""
     existing = {row[1] for row in conn.execute("PRAGMA table_info(user_profiles)").fetchall()}
@@ -189,6 +197,7 @@ def init_db(db_path: str = DB_PATH) -> None:
         for ddl in _ALL_DDL:
             cursor.execute(ddl)
 
+        _migrate_ai_thoughts_urgency(conn)
         _migrate_profile_overrides(conn)
         conn.commit()
         logger.info(f"Dashboard DB initialised at {db_path} (WAL mode)")

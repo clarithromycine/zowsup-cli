@@ -123,7 +123,7 @@ def _read_llm_config() -> dict:
     conf = configparser.ConfigParser()
     if not config_path.exists():
         return {}
-    conf.read(config_path)
+    conf.read(config_path, encoding='utf-8')
     if not conf.getboolean("AI_LLM_ACTIVE", "enabled", fallback=False):
         return {}
     backend = conf.get("AI_LLM_ACTIVE", "backend", fallback="").upper()

@@ -60,6 +60,10 @@ class AIThought:
     """The full text the LLM returned (same as AIResult.response unless a
     chain-of-thought prefix is stripped in future phases)."""
 
+    # ── Urgency ───────────────────────────────────────────────────────────
+    urgency_level: Optional[str] = None
+    """Detected urgency from user message: 'high', 'medium', or 'low'. (Phase 3)"""
+
     def to_db_row(self) -> dict:
         """Return a dict ready to be inserted into the ai_thoughts table."""
         return {
@@ -71,6 +75,7 @@ class AIThought:
             "tone": self.tone,
             "response_quality_score": self.response_quality_score,
             "raw_thought": self.raw_thought,
+            "urgency_level": self.urgency_level,
         }
 
 

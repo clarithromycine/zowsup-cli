@@ -59,7 +59,12 @@
     "selectContact": "Select a contact to view chat history",
     "loading": "Loading...",
     "empty": "No messages",
-    "user": "User"
+    "user": "User",
+    "urgency": {
+      "high": "Urgent",
+      "medium": "Soon",
+      "low": "Low priority"
+    }
   },
   "stats": {
     "totalMessages": "Total Messages",

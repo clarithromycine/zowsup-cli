@@ -832,7 +832,7 @@ class ZowBotLayer(YowInterfaceLayer):
                 }
             
             conf = configparser.ConfigParser()
-            conf.read(config_path)
+            conf.read(config_path, encoding='utf-8')
             
             ai_config = {
                 'ai_llm_active': {},
@@ -1023,6 +1023,9 @@ class ZowBotLayer(YowInterfaceLayer):
                 self._satisfaction.start(asyncio.get_event_loop())
             elif self.ai_service:
                 self.logger.debug("AI service already initialized, skipping init")
+                # Restart satisfaction plugin timer on reconnect (stop() was called on disconnect)
+                if self._satisfaction:
+                    self._satisfaction.start(asyncio.get_event_loop())
             else:
                 self.logger.warning(f"Cannot initialize AI service: db={self.db is not None}")
         except Exception as e:
@@ -1174,7 +1177,6 @@ class ZowBotLayer(YowInterfaceLayer):
             from core.layers.protocol_messages.protocolentities.message_extendedtext import ExtendedTextMessageProtocolEntity
             from core.layers.protocol_messages.protocolentities.attributes.attributes_message_meta import MessageMetaAttributes
             from core.layers.protocol_messages.protocolentities.attributes.attributes_extendedtext import ExtendedTextAttributes
-            from core.layers.protocol_messages.jid import Jid
             
             # Create response message attributes
             attr = ExtendedTextAttributes(
@@ -1360,18 +1362,20 @@ class ZowBotLayer(YowInterfaceLayer):
             "raw":base64.b64encode(messageProtocolEntity.raw)
         })
 
-        # Persist to dashboard.db for every text message, independent of AI
-        if text and self._dashboard_db_path:
-            direction = "out" if messageProtocolEntity.fromme else "in"
-            self._save_msg_to_dashboard(jid, direction, text)
-
         # Send message acks with probabilistic behavior
         await self._async_send_message_acks(messageProtocolEntity)        
         
         # Satisfaction plugin: intercept 1-5 rating replies before AI processing
+        # Must run before _save_msg_to_dashboard so survey replies are NOT recorded in chat history
         if text and not messageProtocolEntity.fromme and self._satisfaction:
             if await self._satisfaction.intercept(jid, text):
                 return
+
+        # Persist to dashboard.db for every text message, independent of AI
+        # (runs after satisfaction intercept so survey replies are excluded)
+        if text and self._dashboard_db_path:
+            direction = "out" if messageProtocolEntity.fromme else "in"
+            self._save_msg_to_dashboard(jid, direction, text)
 
         # AI auto-reply processing (Phase 1.5: real API mode with message sending)
         if self.ai_service:

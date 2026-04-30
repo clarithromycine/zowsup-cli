@@ -333,10 +333,12 @@ def chat_history():
         ).fetchone()[0]
 
         rows = conn.execute(
-            "SELECT id, user_jid, direction, content, message_type, timestamp, created_at "
-            "FROM chat_messages "
-            "WHERE user_jid = ? "
-            "ORDER BY timestamp DESC "
+            "SELECT cm.id, cm.user_jid, cm.direction, cm.content, cm.message_type, "
+            "       cm.timestamp, cm.created_at, at.urgency_level "
+            "FROM chat_messages cm "
+            "LEFT JOIN ai_thoughts at ON at.message_id = cm.id "
+            "WHERE cm.user_jid = ? "
+            "ORDER BY cm.timestamp DESC "
             "LIMIT ? OFFSET ?",
             (jid, page_size, offset),
         ).fetchall()
@@ -465,7 +467,7 @@ def user_ai_thoughts():
             SELECT id, message_id, user_jid,
                    intent, confidence, detected_keywords,
                    strategy_selected, strategy_reasoning,
-                   tone, response_quality_score, created_at
+                   tone, response_quality_score, urgency_level, created_at
             FROM ai_thoughts
             WHERE user_jid = ?
             ORDER BY created_at DESC

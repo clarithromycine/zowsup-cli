@@ -405,7 +405,13 @@ const UserProfile: React.FC = () => {
         </Col>
       </Row>
 
-      <Descriptions size="small" column={1} bordered style={{ marginBottom: 12 }}>
+      <Descriptions
+        size="small"
+        column={1}
+        bordered
+        labelStyle={{ width: 80, whiteSpace: 'nowrap' }}
+        style={{ marginBottom: 12 }}
+      >
         <Descriptions.Item label={t('userProfile.category')}>
           <InlineTagEditor
             value={profile.user_category}
@@ -427,7 +433,15 @@ const UserProfile: React.FC = () => {
           />
         </Descriptions.Item>
         <Descriptions.Item label={t('userProfile.currentStrategy')}>
-          <Tag color="green">{profile.current_strategy ?? t('userProfile.default')}</Tag>
+          {profile.current_strategy && typeof profile.current_strategy === 'object'
+            ? <Space size={4} wrap>
+                {Object.entries(profile.current_strategy as Record<string, string>)
+                  .filter(([, v]) => v)
+                  .map(([k, v]) => (
+                    <Tag key={k} color="green" style={{ margin: 0, fontSize: 11 }}>{k}={v}</Tag>
+                  ))}
+              </Space>
+            : <Tag color="green">{profile.current_strategy ? String(profile.current_strategy) : t('userProfile.default')}</Tag>}
         </Descriptions.Item>
         <Descriptions.Item label={t('userProfile.firstSeen')}>
           {profile.first_seen ? dayjs(profile.first_seen).format('YYYY-MM-DD') : '—'}

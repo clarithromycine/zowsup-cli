@@ -241,6 +241,15 @@ class AIService:
                 except Exception as _se:
                     logger.warning("Strategy load failed (ignored): %s", _se)
 
+            # Phase 3: detect intent + urgency early, auto-adjust system prompt
+            early_intent  = self._detect_intent(user_msg)
+            early_urgency = self._detect_urgency(user_msg)
+            auto_extra, auto_tone = self._auto_adjust_strategy(user_jid, early_intent)
+            if auto_extra:
+                system_extra += auto_extra
+            if early_urgency == "high":
+                system_extra += "\n- URGENT: Respond concisely and immediately."
+
             # Phase 2: apply context window from strategy
             memory_context = self.memory.get_recent_memory(user_jid=user_jid, days=context_days)
             memory_context = memory_context[-context_turns:]
@@ -325,7 +334,10 @@ class AIService:
             # Phase 2: Build thought record + persist to dashboard.db (fire-and-forget)
             from app.ai_module.models import AIResult, AIThought
             thought = self._build_thought(user_msg=user_msg, response=response,
-                                          strategy_info=strategy_info)
+                                          strategy_info=strategy_info,
+                                          intent_hint=early_intent,
+                                          tone_hint=auto_tone,
+                                          urgency_hint=early_urgency)
             if self.dashboard_db_path:
                 chat_msg_id = self._save_chat_messages_to_dashboard(
                     user_jid=user_jid,
@@ -335,6 +347,9 @@ class AIService:
                 )
                 self._save_ai_thought(thought, user_jid=user_jid,
                                       bot_id=bot_id or "", message_id=chat_msg_id)
+                # Phase 4: update long-term user portrait
+                self._update_user_profile(thought, user_jid=user_jid,
+                                          strategy_info=strategy_info)
 
             return AIResult(response=response, thought=thought)
         
@@ -356,26 +371,85 @@ class AIService:
         "of", "with", "about", "by", "from",
     }
 
+    @staticmethod
+    def _detect_intent(user_msg: str) -> str:
+        """Rule-based intent detection from user message text."""
+        msg_lower = user_msg.lower().strip()
+        if "?" in user_msg or msg_lower.startswith(("what", "how", "why", "when", "where", "who")):
+            return "question"
+        if any(w in msg_lower for w in ("hello", "hi", "hey", "good morning", "good evening")):
+            return "greeting"
+        if any(w in msg_lower for w in ("help", "assist", "support", "problem", "issue", "error")):
+            return "support"
+        if any(w in msg_lower for w in ("buy", "price", "cost", "purchase", "order")):
+            return "purchase_intent"
+        return "statement"
+
+    @staticmethod
+    def _detect_urgency(user_msg: str) -> str:
+        """Return 'high', 'medium', or 'low' urgency from message text (Phase 3)."""
+        low = user_msg.lower()
+        _HIGH = {"急", "紧急", "urgent", "emergency", "asap", "immediately",
+                 "hurry", "critical", "火急", "马上", "立刻", "right now", "sos"}
+        _MEDIUM = {"soon", "quick", "快", "尽快", "早点", "waiting"}
+        if any(w in low for w in _HIGH):
+            return "high"
+        if any(w in low for w in _MEDIUM):
+            return "medium"
+        return "low"
+
+    def _auto_adjust_strategy(self, user_jid: str, current_intent: str) -> tuple:
+        """
+        Check recent ai_thoughts for this user.  If the last 3 turns (including
+        the current one) are all 'support', inject empathetic tone hint into
+        system_extra and return it together with an auto_tone override.
+
+        Returns: (extra_system_prompt: str, auto_tone: str | None)
+        """
+        if not self.dashboard_db_path or not current_intent:
+            return "", None
+        try:
+            conn = sqlite3.connect(self.dashboard_db_path, timeout=3)
+            try:
+                rows = conn.execute(
+                    "SELECT intent FROM ai_thoughts WHERE user_jid = ? "
+                    "ORDER BY created_at DESC LIMIT 2",
+                    (user_jid,),
+                ).fetchall()
+            finally:
+                conn.close()
+
+            recent_intents = [r[0] for r in rows]
+            all_intents = [current_intent] + recent_intents
+            if len(all_intents) >= 3 and all(i == "support" for i in all_intents[:3]):
+                extra = "\n- The user has sent multiple support requests. Show strong empathy and patience."
+                return extra, "empathetic"
+            if current_intent == "purchase_intent":
+                extra = "\n- The user is interested in purchasing. Be helpful and informative."
+                return extra, None
+        except Exception as _e:
+            logger.debug("_auto_adjust_strategy error (ignored): %s", _e)
+        return "", None
+
     def _build_thought(self, user_msg: str, response: str,
-                       strategy_info: dict = None) -> "AIThought":
+                       strategy_info: dict = None,
+                       intent_hint: str = None,
+                       tone_hint: str = None,
+                       urgency_hint: str = None) -> "AIThought":
         """
         Build a lightweight AIThought from user message + AI response.
         Uses simple heuristics — no extra LLM call required.
+
+        Parameters
+        ----------
+        intent_hint  : pre-computed intent (avoids re-detection)
+        tone_hint    : forced tone override (e.g. from _auto_adjust_strategy)
+        urgency_hint : pre-computed urgency level
         """
         from app.ai_module.models import AIThought
 
-        # ── Intent detection (rule-based) ─────────────────────────────────
-        msg_lower = user_msg.lower().strip()
-        if "?" in user_msg or msg_lower.startswith(("what", "how", "why", "when", "where", "who")):
-            intent = "question"
-        elif any(w in msg_lower for w in ("hello", "hi", "hey", "good morning", "good evening")):
-            intent = "greeting"
-        elif any(w in msg_lower for w in ("help", "assist", "support", "problem", "issue", "error")):
-            intent = "support"
-        elif any(w in msg_lower for w in ("buy", "price", "cost", "purchase", "order")):
-            intent = "purchase_intent"
-        else:
-            intent = "statement"
+        # ── Intent detection ──────────────────────────────────────────────
+        intent = intent_hint if intent_hint else self._detect_intent(user_msg)
 
         # ── Keyword extraction ────────────────────────────────────────────
         words = re.findall(r"[a-zA-Z\u4e00-\u9fff]+", user_msg)
@@ -400,16 +474,22 @@ class AIService:
         else:
             quality = 0.75
 
-        # ── Tone detection (based on response content) ────────────────────
-        resp_lower = response.lower()
-        if any(w in resp_lower for w in ("sorry", "apologize", "unfortunately")):
-            tone = "empathetic"
-        elif any(w in resp_lower for w in ("!", "great", "excellent", "wonderful")):
-            tone = "friendly"
-        elif resp_len > 300:
-            tone = "detailed"
+        # ── Tone detection (based on response content; overridden by tone_hint) ──
+        if tone_hint:
+            tone = tone_hint
         else:
-            tone = "concise"
+            resp_lower = response.lower()
+            if any(w in resp_lower for w in ("sorry", "apologize", "unfortunately")):
+                tone = "empathetic"
+            elif any(w in resp_lower for w in ("!", "great", "excellent", "wonderful")):
+                tone = "friendly"
+            elif resp_len > 300:
+                tone = "detailed"
+            else:
+                tone = "concise"
+
+        # ── Urgency ───────────────────────────────────────────────────────
+        urgency_level = urgency_hint if urgency_hint else self._detect_urgency(user_msg)
 
         # ── Strategy fields ───────────────────────────────────────────────
         if strategy_info:
@@ -429,6 +509,7 @@ class AIService:
             tone=tone,
             response_quality_score=quality,
             raw_thought=response,
+            urgency_level=urgency_level,
         )
 
     def _save_chat_messages_to_dashboard(
@@ -498,8 +579,8 @@ class AIService:
                         (message_id, user_jid,
                          intent, confidence, detected_keywords,
                          strategy_selected, strategy_reasoning,
-                         tone, response_quality_score, raw_thought)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         tone, response_quality_score, raw_thought, urgency_level)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         message_id,
@@ -512,6 +593,7 @@ class AIService:
                         row["tone"],
                         row["response_quality_score"],
                         row["raw_thought"],
+                        row["urgency_level"],
                     ),
                 )
                 conn.commit()
@@ -519,6 +601,177 @@ class AIService:
                 conn.close()
         except Exception as e:
             logger.warning(f"Dashboard ai_thoughts write failed: {e}")
+
+    # ─────────────────────────────────────── Phase 4 helpers ─────────────────
+
+    @staticmethod
+    def _compute_user_category(interactions: int, satisfaction: Optional[float]) -> str:
+        """Derive user_category from interaction count and satisfaction score."""
+        if satisfaction is not None and satisfaction < 2.5:
+            return "at_risk"
+        if interactions >= 30 and (satisfaction is None or satisfaction >= 3.5):
+            return "VIP"
+        if interactions >= 5:
+            return "regular"
+        return "new"
+
+    @staticmethod
+    def _tone_to_style(tone: Optional[str], urgency: Optional[str]) -> Optional[str]:
+        """Map a single ai_thoughts record to a communication style candidate."""
+        if urgency == "high":
+            return "impatient"
+        if urgency == "low":
+            return "patient"
+        if tone == "detailed":
+            return "detailed"
+        if tone == "concise":
+            return "concise"
+        return None
+
+    def _update_user_profile(
+        self,
+        thought: "AIThought",
+        user_jid: str,
+        strategy_info: dict,
+    ) -> None:
+        """
+        Phase 4: update user_profiles from the current AIThought (fire-and-forget).
+
+        Updates:
+          - total_interactions (+1)
+          - first_seen / last_seen
+          - topic_preferences (JSON {word: count} accumulation)
+          - communication_style (majority vote from last 5 thoughts + current)
+          - user_category (rule-based from interaction count + satisfaction)
+          - trend_7d / trend_30d (rolling day-bucket counts from chat_messages)
+          - current_strategy (JSON snapshot of active strategy_info)
+
+        Never raises — any failure is logged and swallowed.
+        """
+        if not self.dashboard_db_path:
+            return
+        try:
+            import json as _json
+            conn = sqlite3.connect(self.dashboard_db_path, timeout=5)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+
+                # ── Ensure row exists ─────────────────────────────────────
+                conn.execute(
+                    "INSERT OR IGNORE INTO user_profiles (user_jid, first_seen) "
+                    "VALUES (?, CURRENT_TIMESTAMP)",
+                    (user_jid,),
+                )
+
+                # ── Read current snapshot ─────────────────────────────────
+                row = conn.execute(
+                    "SELECT total_interactions, topic_preferences, satisfaction_score "
+                    "FROM user_profiles WHERE user_jid = ?",
+                    (user_jid,),
+                ).fetchone()
+                old_interactions = row[0] or 0
+                old_topics_raw   = row[1]
+                satisfaction     = row[2]
+                new_interactions = old_interactions + 1
+
+                # ── topic_preferences ────────────────────────────────────
+                try:
+                    topics: dict = _json.loads(old_topics_raw) if old_topics_raw else {}
+                except (ValueError, TypeError):
+                    topics = {}
+                for kw in (thought.detected_keywords or []):
+                    topics[kw] = topics.get(kw, 0) + 1
+                # Keep top-50 by count to avoid unbounded growth
+                if len(topics) > 50:
+                    topics = dict(sorted(topics.items(), key=lambda x: x[1], reverse=True)[:50])
+                topics_json = _json.dumps(topics, ensure_ascii=False)
+
+                # ── communication_style (majority vote last 5 thoughts) ───
+                recent_rows = conn.execute(
+                    "SELECT tone, urgency_level FROM ai_thoughts "
+                    "WHERE user_jid = ? ORDER BY created_at DESC LIMIT 4",
+                    (user_jid,),
+                ).fetchall()
+                style_votes: dict = {}
+                # include current thought
+                all_votes = [(thought.tone, thought.urgency_level)] + \
+                            [(r[0], r[1]) for r in recent_rows]
+                for t_tone, t_urg in all_votes:
+                    s = self._tone_to_style(t_tone, t_urg)
+                    if s:
+                        style_votes[s] = style_votes.get(s, 0) + 1
+                # Update only if a clear majority (>50%) exists
+                new_style = None
+                if style_votes:
+                    top_style, top_count = max(style_votes.items(), key=lambda x: x[1])
+                    if top_count > len(all_votes) // 2:
+                        new_style = top_style
+
+                # ── user_category ─────────────────────────────────────────
+                new_category = self._compute_user_category(new_interactions, satisfaction)
+
+                # ── trend data (7d / 30d) from chat_messages ──────────────
+                def _build_trend(days: int) -> str:
+                    trend_rows = conn.execute(
+                        "SELECT date(timestamp, 'unixepoch') AS day, COUNT(*) AS cnt "
+                        "FROM chat_messages "
+                        "WHERE user_jid = ? "
+                        "  AND timestamp >= strftime('%s', 'now', ? || ' days') "
+                        "GROUP BY day ORDER BY day ASC",
+                        (user_jid, f"-{days}"),
+                    ).fetchall()
+                    dates  = [r[0] for r in trend_rows]
+                    counts = [r[1] for r in trend_rows]
+                    return _json.dumps({"dates": dates, "counts": counts})
+
+                trend_7d  = _build_trend(7)
+                trend_30d = _build_trend(30)
+
+                # ── current_strategy snapshot ──────────────────────────────
+                strat_json = _json.dumps(strategy_info, ensure_ascii=False) if strategy_info else None
+
+                # ── UPSERT ─────────────────────────────────────────────────
+                conn.execute(
+                    """
+                    UPDATE user_profiles SET
+                        total_interactions = ?,
+                        last_seen          = CURRENT_TIMESTAMP,
+                        topic_preferences  = ?,
+                        user_category      = CASE
+                            WHEN user_category_override IS NOT NULL THEN user_category
+                            ELSE ?
+                        END,
+                        communication_style = CASE
+                            WHEN communication_style_override IS NOT NULL THEN communication_style
+                            WHEN ? IS NOT NULL THEN ?
+                            ELSE communication_style
+                        END,
+                        trend_7d          = ?,
+                        trend_30d         = ?,
+                        current_strategy  = COALESCE(?, current_strategy),
+                        updated_at        = CURRENT_TIMESTAMP
+                    WHERE user_jid = ?
+                    """,
+                    (
+                        new_interactions,
+                        topics_json,
+                        new_category,
+                        new_style, new_style,   # CASE ? IS NOT NULL THEN ?
+                        trend_7d,
+                        trend_30d,
+                        strat_json,
+                        user_jid,
+                    ),
+                )
+                conn.commit()
+                logger.debug(
+                    "Profile updated: jid=%s interactions=%d category=%s style=%s",
+                    user_jid, new_interactions, new_category, new_style,
+                )
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning("_update_user_profile failed (ignored): %s", e)
 
     # ─────────────────────────────────────────────────────────────────────────
 

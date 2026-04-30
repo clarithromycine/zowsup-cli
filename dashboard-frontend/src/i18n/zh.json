@@ -58,7 +58,12 @@
     "selectContact": "请选择一个联系人查看聊天记录",
     "loading": "加载中...",
     "empty": "暂无聊天记录",
-    "user": "用户"
+    "user": "用户",
+    "urgency": {
+      "high": "紧急",
+      "medium": "较急",
+      "low": "不急"
+    }
   },
   "stats": {
     "totalMessages": "总消息数",

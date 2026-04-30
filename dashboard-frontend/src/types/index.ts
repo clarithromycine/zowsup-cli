@@ -10,6 +10,7 @@ export interface ChatMessage {
   message_type: string
   timestamp: number
   created_at: string
+  urgency_level?: string | null
 }
 
 export interface AIThought {
@@ -24,6 +25,7 @@ export interface AIThought {
   tone: string | null
   response_quality_score: number | null
   raw_thought: string | null
+  urgency_level: string | null
   created_at: string
 }
 

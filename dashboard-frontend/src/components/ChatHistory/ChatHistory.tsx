@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { Typography, Tag, Spin, Empty, Pagination, Tooltip } from 'antd'
-import { RobotOutlined, UserOutlined } from '@ant-design/icons'
+import { RobotOutlined, UserOutlined, AlertOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { fetchChatHistory } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
@@ -8,6 +8,26 @@ import { useTranslation } from 'react-i18next'
 import type { ChatMessage } from '../../types'
 
 const { Text } = Typography
+
+const _URGENCY_COLOR: Record<string, string> = {
+  high: 'red',
+  medium: 'orange',
+  low: 'default',
+}
+
+function UrgencyTag({ level }: { level: string }) {
+  const { t } = useTranslation()
+  if (!level || level === 'low') return null
+  return (
+    <Tag
+      color={_URGENCY_COLOR[level] ?? 'default'}
+      icon={level === 'high' ? <AlertOutlined /> : undefined}
+      style={{ margin: 0, fontSize: 11 }}
+    >
+      {t(`chatHistory.urgency.${level}`, level)}
+    </Tag>
+  )
+}
 
 function SourceTag({ direction }: { direction: 'in' | 'out' }) {
   const { t } = useTranslation()
@@ -44,6 +64,9 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
         </Text>
         <div style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
           <SourceTag direction={msg.direction} />
+          {msg.direction === 'out' && msg.urgency_level && (
+            <UrgencyTag level={msg.urgency_level} />
+          )}
           <Tooltip title={dayjs.unix(msg.timestamp).format('YYYY-MM-DD HH:mm:ss')}>
             <Text type="secondary" style={{ fontSize: 11 }}>
               {dayjs.unix(msg.timestamp).format('HH:mm')}

@@ -115,7 +115,7 @@ class SatisfactionPlugin:
         """Create the background timer task on *loop*. No-op if already running."""
         if self._task is None or self._task.done():
             self._task = loop.create_task(self._timer_task())
-            self._logger.debug("SatisfactionPlugin timer task started")
+            self._logger.info(f"SatisfactionPlugin timer task started (enabled={self._enabled}, timeout={self._timeout_minutes}m)")
 
     def stop(self) -> None:
         """Cancel the background timer task."""
@@ -130,6 +130,7 @@ class SatisfactionPlugin:
         state["last_ai_reply"] = time.time()
         state["asked"] = False
         state["waiting"] = False
+        self._logger.info(f"SatisfactionPlugin: AI reply recorded for {jid}, survey in {self._timeout_minutes}m")
 
     async def intercept(self, jid: str, text: str) -> bool:
         """
