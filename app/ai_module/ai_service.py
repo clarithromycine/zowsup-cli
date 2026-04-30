@@ -214,7 +214,7 @@ class AIService:
                 logger.debug(f"[MSG EXTRACT] Using getCaption(): {repr(user_msg[:50])}")
             
             memory_context = self.memory.get_recent_memory(user_jid=user_jid)
-            
+
             # Final log after extraction
             logger.debug(f"[MSG EXTRACT] Final result: user_msg={repr(user_msg[:50] if user_msg else user_msg)} (len={len(user_msg)})")
             
@@ -231,12 +231,21 @@ class AIService:
             # Phase 3: Load active strategy for this user
             system_extra = ""
             strategy_info: dict = {}
+            context_turns: int = 10
+            context_days:  int = 3
             if self.strategy_manager:
                 try:
                     strategy_info = self.strategy_manager.get_active_strategy(user_jid)
-                    system_extra = self.strategy_manager.build_system_prompt_extra(user_jid)
+                    system_extra  = self.strategy_manager.build_system_prompt_extra(user_jid)
+                    context_turns, context_days = self.strategy_manager.get_context_config(user_jid)
                 except Exception as _se:
                     logger.warning("Strategy load failed (ignored): %s", _se)
+
+            # Phase 2: apply context window from strategy
+            memory_context = self.memory.get_recent_memory(user_jid=user_jid, days=context_days)
+            memory_context = memory_context[-context_turns:]
+            logger.debug(f"Context window: turns={context_turns}, days={context_days}, "
+                         f"records={len(memory_context)}")
             
             if not self.backend.is_configured():
                 logger.warning("AI backend not configured, skipping processing")

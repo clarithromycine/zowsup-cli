@@ -122,6 +122,8 @@
     "customInstructions": "自定义指令",
     "customInstructionsPlaceholder": "输入额外指令（可选）",
     "notePlaceholder": "本次修改备注（可选）",
+    "contextTurns": "上下文轮数",
+    "contextDays": "记忆天数",
     "activated": "激活",
     "inactive": "已屏蔽"
   },

@@ -123,6 +123,8 @@
     "customInstructions": "Custom Instructions",
     "customInstructionsPlaceholder": "Enter additional instructions (optional)",
     "notePlaceholder": "Note for this change (optional)",
+    "contextTurns": "Context Turns",
+    "contextDays": "Memory Days",
     "activated": "Active",
     "inactive": "Inactive"
   },

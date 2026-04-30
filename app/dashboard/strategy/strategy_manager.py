@@ -11,10 +11,12 @@ Responsibilities:
 Priority rule: personal strategy overrides global (field-by-field merge).
 
 Supported strategy config fields:
-  response_style  : "formal" | "casual" | "concise" | "detailed"
-  tone            : "polite" | "friendly" | "professional" | "empathetic" | "neutral"
-  language        : "auto" | "zh" | "en" | "mixed"
-  custom_instructions : free-text string appended verbatim to the system prompt
+  response_style       : "formal" | "casual" | "concise" | "detailed"
+  tone                 : "polite" | "friendly" | "professional" | "empathetic" | "neutral"
+  language             : "auto" | "zh" | "en" | "mixed"
+  custom_instructions  : free-text string appended verbatim to the system prompt
+  context_turns        : int 1-50 — max history turns passed to the LLM (default 10)
+  context_days         : int 1-30 — memory look-back window in days (default 3)
 
 Storage: data/dashboard.db, table strategy_applications
 """
@@ -502,3 +504,16 @@ class StrategyManager:
             return ""
 
         return "\n".join(parts)
+
+    def get_context_config(self, user_jid: str = None) -> tuple[int, int]:
+        """
+        Return ``(context_turns, context_days)`` resolved from the merged strategy.
+        Personal strategy overrides global; falls back to defaults (10, 3).
+        """
+        strategy = self.get_active_strategy(user_jid)
+        turns = strategy.get("context_turns", 10)
+        days  = strategy.get("context_days",  3)
+        # Clamp to safe ranges
+        turns = max(1, min(50, int(turns)))
+        days  = max(1, min(30, int(days)))
+        return turns, days

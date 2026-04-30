@@ -4,6 +4,7 @@ import {
   Form,
   Select,
   Input,
+  InputNumber,
   Button,
   Table,
   Tag,
@@ -285,6 +286,12 @@ const StrategyPage: React.FC = () => {
               </Form.Item>
               <Form.Item name="custom_instructions" label={t('strategy.customInstructions')}>
                 <TextArea rows={3} placeholder={t('strategy.customInstructionsPlaceholder')} maxLength={500} showCount />
+              </Form.Item>
+              <Form.Item name="context_turns" label={t('strategy.contextTurns')}>
+                <InputNumber min={1} max={50} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item name="context_days" label={t('strategy.contextDays')}>
+                <InputNumber min={1} max={30} style={{ width: '100%' }} />
               </Form.Item>
               <Form.Item name="note" label={t('common.remark')}>
                 <Input placeholder={t('strategy.notePlaceholder')} maxLength={200} />

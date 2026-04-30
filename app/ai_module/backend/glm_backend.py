@@ -86,7 +86,7 @@ class GLMBackend(AIBackendBase):
         context_str = ""
         if memory_context:
             context_str = "过去对话:\n"
-            for item in memory_context[-10:]:  # Last 10 items (most recent)
+            for item in memory_context:  # pre-sliced by AIService (context_turns)
                 context_str += f"用户: {item.get('user_message', '')}\n"
                 context_str += f"我: {item.get('ai_response', '')}\n"
         
@@ -136,7 +136,7 @@ class GLMBackend(AIBackendBase):
             # Add memory context to system context
             if memory_context:
                 context_str = "以下是过去的对话记录:\n"
-                for item in memory_context[-10:]:  # Last 10 items (most recent)
+                for item in memory_context:  # pre-sliced by AIService (context_turns)
                     context_str += f"用户: {item.get('user_message', '')}\n"
                     context_str += f"助手: {item.get('ai_response', '')}\n"
                 
