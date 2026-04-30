@@ -186,6 +186,12 @@ class ZowBotLayer(YowInterfaceLayer):
         # Dashboard DB path — set once CONFIG is loaded; used for direct message persistence
         self._dashboard_db_path: "str | None" = None
 
+        # Phase 1 — Satisfaction collection
+        # {jid: {last_ai_reply: float, asked: bool, waiting: bool}}
+        self._sat_state: dict = {}
+        self._satTask = None
+        self._sat_config: dict = {}
+
     async def _sendIqAsync(self, entity):
         """
         Send an IQ entity asynchronously and return a Future with the result.
@@ -328,7 +334,11 @@ class ZowBotLayer(YowInterfaceLayer):
             })          
 
         self.isConnected = False
-                
+
+        if self._satTask and not self._satTask.done():
+            self._satTask.cancel()
+            self._satTask = None
+
         if self.ai_service:
             self.ai_service.cancel_retry_task()
                    
@@ -868,7 +878,20 @@ class ZowBotLayer(YowInterfaceLayer):
             if conf.has_section('AI_FILTER'):
                 ai_config['ai_filter']['p2p_only'] = conf.getboolean('AI_FILTER', 'p2p_only', fallback=True)
                 ai_config['ai_filter']['skip_self_device'] = conf.getboolean('AI_FILTER', 'skip_self_device', fallback=True)
-            
+
+            # Read AI_SATISFACTION section
+            if conf.has_section('AI_SATISFACTION'):
+                ai_config['ai_satisfaction'] = {
+                    'enabled': conf.getboolean('AI_SATISFACTION', 'enabled', fallback=False),
+                    'timeout_minutes': conf.getint('AI_SATISFACTION', 'timeout_minutes', fallback=30),
+                    'question_text': conf.get('AI_SATISFACTION', 'question_text',
+                        fallback='请问这次回答对您有帮助吗？请回复 1-5 分（1=很差，5=非常好）'),
+                    'thank_you_text': conf.get('AI_SATISFACTION', 'thank_you_text',
+                        fallback='感谢您的反馈！'),
+                }
+            else:
+                ai_config['ai_satisfaction'] = {'enabled': False, 'timeout_minutes': 30}
+
             self.logger.debug(f"AI config loaded: {ai_config}")
             return ai_config
             
@@ -880,7 +903,8 @@ class ZowBotLayer(YowInterfaceLayer):
                 'ai_llm_qwen': {'auth_mode': 'apikey', 'api_key': '', 'model': 'qwen-plus'},
                 'ai_memory': {'memory_window_days': 3, 'cleanup_strategy': 'first_daily_message'},
                 'ai_retry': {'retry_delay_minutes': 5, 'max_retry_attempts': 1, 'enabled': True},
-                'ai_filter': {'p2p_only': True, 'skip_self_device': True}
+                'ai_filter': {'p2p_only': True, 'skip_self_device': True},
+                'ai_satisfaction': {'enabled': False, 'timeout_minutes': 30},
             }
 
     @ProtocolEntityCallback("success")
@@ -987,9 +1011,18 @@ class ZowBotLayer(YowInterfaceLayer):
                 
                 # Phase 1.5: Start background retry task
                 self.ai_service.start_retry_task(check_interval_seconds=60)
-                
+
                 self.logger.info(f"AI service initialized for account {self.bot.botId}")
                 self.logger.debug(f"Retry manager started (enabled={ai_config.get('ai_retry', {}).get('enabled', False)})")
+
+                # Phase 1 Satisfaction: store config and start timer task
+                self._sat_config = ai_config.get('ai_satisfaction', {'enabled': False})
+                if self._sat_config.get('enabled') and (
+                    self._satTask is None or self._satTask.done()
+                ):
+                    loop = asyncio.get_event_loop()
+                    self._satTask = loop.create_task(self._satisfaction_timer_task())
+                    self.logger.debug("Satisfaction timer task started")
             elif self.ai_service:
                 self.logger.debug("AI service already initialized, skipping init")
             else:
@@ -1168,6 +1201,111 @@ class ZowBotLayer(YowInterfaceLayer):
         except Exception as send_err:
             self.logger.error(f"Failed to send AI retry response to {user_jid}: {send_err}", exc_info=True)
 
+    # ── Phase 1: Satisfaction collection ─────────────────────────────────────
+
+    def _record_ai_reply(self, jid: str) -> None:
+        """Record that AI just replied to this user; resets the satisfaction timer."""
+        state = self._sat_state.setdefault(jid, {})
+        state['last_ai_reply'] = time.time()
+        state['asked'] = False
+        state['waiting'] = False
+
+    def _is_satisfaction_reply(self, jid: str, text: str) -> bool:
+        """Return True if this message is a 1-5 satisfaction rating we are waiting for."""
+        state = self._sat_state.get(jid)
+        if not state or not state.get('waiting'):
+            return False
+        return text.strip() in {'1', '2', '3', '4', '5'}
+
+    async def _handle_satisfaction_reply(self, jid: str, score_str: str) -> None:
+        """Persist satisfaction score, send thank-you, reset state."""
+        score_int = int(score_str.strip())
+        self._write_satisfaction_score(jid, score_int)
+        state = self._sat_state.get(jid, {})
+        state['waiting'] = False
+        state['asked'] = False
+        state['last_ai_reply'] = 0  # won't re-trigger until next AI reply
+        thank_you = self._sat_config.get('thank_you_text', '感谢您的反馈！')
+        try:
+            await self._ai_send_response(jid, thank_you)
+        except Exception as exc:
+            self.logger.warning(f"Failed to send satisfaction thank-you to {jid}: {exc}")
+        self.logger.info(f"Satisfaction score {score_int}/5 recorded for {jid}")
+
+    async def _send_satisfaction_question(self, jid: str) -> None:
+        """Send the configured satisfaction question to a user."""
+        question = self._sat_config.get(
+            'question_text',
+            '请问这次回答对您有帮助吗？请回复 1-5 分（1=很差，5=非常好）'
+        )
+        await self._ai_send_response(jid, question)
+
+    async def _satisfaction_timer_task(self) -> None:
+        """Background task: poll every 30 s and send satisfaction question after silence."""
+        try:
+            while True:
+                await asyncio.sleep(30)
+                if not self.isConnected:
+                    continue
+                if not self._sat_config.get('enabled'):
+                    continue
+                timeout_secs = self._sat_config.get('timeout_minutes', 30) * 60
+                now = time.time()
+                for jid, state in list(self._sat_state.items()):
+                    if state.get('waiting') or state.get('asked'):
+                        continue
+                    last_reply = state.get('last_ai_reply', 0)
+                    if last_reply > 0 and now - last_reply > timeout_secs:
+                        try:
+                            await self._send_satisfaction_question(jid)
+                            state['asked'] = True
+                            state['waiting'] = True
+                            self.logger.info(f"Sent satisfaction question to {jid}")
+                        except Exception as exc:
+                            self.logger.warning(
+                                f"Failed to send satisfaction question to {jid}: {exc}"
+                            )
+        except asyncio.CancelledError:
+            self.logger.debug("Satisfaction timer task cancelled")
+
+    def _write_satisfaction_score(self, jid: str, score_int: int) -> None:
+        """Write satisfaction score (1-5) to user_profiles using an EMA."""
+        db_path = self._dashboard_db_path
+        if not db_path:
+            return
+        normalized = round(score_int / 5.0, 4)
+        try:
+            import sqlite3 as _sq3
+            conn = _sq3.connect(db_path, timeout=5)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                row = conn.execute(
+                    "SELECT satisfaction_score FROM user_profiles WHERE user_jid = ?",
+                    (jid,)
+                ).fetchone()
+                if row and row[0] is not None:
+                    new_score = round(0.7 * row[0] + 0.3 * normalized, 4)
+                else:
+                    new_score = normalized
+                conn.execute(
+                    """
+                    INSERT INTO user_profiles
+                        (user_jid, satisfaction_score, total_interactions,
+                         first_seen, last_seen, updated_at)
+                    VALUES (?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_jid) DO UPDATE SET
+                        satisfaction_score = excluded.satisfaction_score,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (jid, new_score)
+                )
+                conn.commit()
+                self.logger.info(f"Satisfaction score {new_score:.4f} written for {jid}")
+            finally:
+                conn.close()
+        except Exception as exc:
+            self.logger.warning(f"Failed to write satisfaction score for {jid}: {exc}")
+
     # ── Dashboard direct persistence ────────────────────────────────────────
 
     def _save_msg_to_dashboard(
@@ -1337,6 +1475,12 @@ class ZowBotLayer(YowInterfaceLayer):
         # Send message acks with probabilistic behavior
         await self._async_send_message_acks(messageProtocolEntity)        
         
+        # Phase 1 Satisfaction: intercept 1-5 rating replies before AI processing
+        if self.ai_service and text and not messageProtocolEntity.fromme:
+            if self._is_satisfaction_reply(jid, text):
+                await self._handle_satisfaction_reply(jid, text)
+                return
+
         # AI auto-reply processing (Phase 1.5: real API mode with message sending)
         if self.ai_service:
             try:
@@ -1376,7 +1520,9 @@ class ZowBotLayer(YowInterfaceLayer):
                         )                        
                         self.bot.botLayer.ackQueue.append(response_entity.getId())                        
                         self.logger.info(f"Sending AI response to {sender_jid}")
-                        await self.toLower(response_entity)                        
+                        await self.toLower(response_entity)
+                        # Phase 1 Satisfaction: record reply time to start silence timer
+                        self._record_ai_reply(jid)
                     except Exception as send_err:
                         self.logger.error(f"Failed to send AI response: {send_err}", exc_info=True)
             except Exception as e:
