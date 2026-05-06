@@ -400,7 +400,10 @@ class ZowBotLayer(YowInterfaceLayer):
                 for  item in entity.collections:
                     collectionNames.append(item["name"])
             self.logger.info("Notification: Received a ServerSync Notification, collections=%s" % ",".join(collectionNames))
-            await self.syncData([','.join(collectionNames)] ,{})
+            try:
+                await self.syncData([','.join(collectionNames)] ,{})
+            except Exception as e:
+                self.logger.warning("syncData failed, continuing: %s", e)
             
         if isinstance(entity,AccountSyncNotificationProtocolEntity):
             self.logger.info("Notification: Received a AccountSync Notification")            
@@ -1634,7 +1637,8 @@ class ZowBotLayer(YowInterfaceLayer):
                 else:
                     raise Exception(f"Unexpected response type: {type(entity_result)}")
         
+        except asyncio.TimeoutError as e:
+            logger.warning("syncData timeout (collections=%s): %s", cmdParams[0], e)
         except Exception as e:
-            logger.error(f"syncData error: {e}")
-            raise
+            logger.error("syncData error: %s", e, exc_info=True)
 
