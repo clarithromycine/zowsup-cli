@@ -42,47 +42,43 @@ class LiteContactStore(TaskMsgStore):
         return None
 
 
-    def findContact(self,jid=None,lid=None):      
-
+    def findContact(self, jid=None, lid=None):
         if jid is None and lid is None:
             return False
-        
-        found = False
-        
-        if  lid is not None:
-            if not lid.endswith("lid"):
-                return False
-            q = "SELECT lid FROM contact WHERE lid = ?"
-            c = self.dbConn.cursor()
-            c.execute(q, (lid, ))     
-            if c.fetchone():                                      
-                found = True
-        
-        if not found:                
-            if jid is not None:
-                if not jid.endswith("s.whatsapp.net"):
-                    return False
-                                
-                q = "SELECT jid FROM contact WHERE jid = ?"
-                c = self.dbConn.cursor()
-                c.execute(q, (jid, ))
-                if c.fetchone():                                      
-                    found = True
-                  
-        return found
-                                                    
-    def removeContact(self,jid,lid):
 
-        if jid is not None:
-            q = "DELETE FROM contact where jid = ?"
-            self.dbConn.cursor().execute(q, (jid,))
-            self.dbConn.commit()        
+        if lid is not None and not lid.endswith("lid"):
+            return False
+        if jid is not None and not jid.endswith("s.whatsapp.net"):
+            return False
 
+        c = self.dbConn.cursor()
+        if lid is not None and jid is not None:
+            c.execute("SELECT 1 FROM contact WHERE lid = ? OR jid = ? LIMIT 1", (lid, jid))
         elif lid is not None:
-            q = "DELETE FROM contact where lid = ?"
-            self.dbConn.cursor().execute(q, (lid,))
-            self.dbConn.commit()        
+            c.execute("SELECT 1 FROM contact WHERE lid = ? LIMIT 1", (lid,))
+        else:
+            c.execute("SELECT 1 FROM contact WHERE jid = ? LIMIT 1", (jid,))
 
+        return c.fetchone() is not None
+                                                    
+    def removeContact(self, jid=None, lid=None):
+        if jid is None and lid is None:
+            return False
+
+        if jid is not None and not jid.endswith("s.whatsapp.net"):
+            return False
+        if lid is not None and not lid.endswith("lid"):
+            return False
+
+        c = self.dbConn.cursor()
+        if lid is not None and jid is not None:
+            c.execute("DELETE FROM contact WHERE jid = ? OR lid = ?", (jid, lid))
+        elif lid is not None:
+            c.execute("DELETE FROM contact WHERE lid = ?", (lid,))
+        else:
+            c.execute("DELETE FROM contact WHERE jid = ?", (jid,))
+
+        self.dbConn.commit()
         return True
     
     def getAllContact(self):
@@ -101,59 +97,49 @@ class LiteContactStore(TaskMsgStore):
 
         return jids
     
-    def updateName(self,jid=None,lid=None,name=None):
+    def updateName(self, jid=None, lid=None, name=None):
         if name is None:
-            return 
-        
-        if self.findContact(jid,lid):   
-            if jid is not None:     
-                q = "UPDATE contact SET name=? WHERE jid=?"
-                self.dbConn.cursor().execute(q, (name,jid))            
-            elif lid is not None:
-                q = "UPDATE contact SET name=? WHERE lid=?"
-                self.dbConn.cursor().execute(q, (name,lid))   
-            self.dbConn.commit()
+            return False
+
+        if not self.findContact(jid, lid):
+            self.updateContact(jid, lid, name=name)
+            return True
+
+        c = self.dbConn.cursor()
+        if lid is not None and jid is not None:
+            c.execute("UPDATE contact SET name=? WHERE jid=? OR lid=?", (name, jid, lid))
+        elif lid is not None:
+            c.execute("UPDATE contact SET name=? WHERE lid=?", (name, lid))
         else:
-            self.updateContact(jid,lid,name=name)
+            c.execute("UPDATE contact SET name=? WHERE jid=?", (name, jid))
+
+        self.dbConn.commit()
 
         return True
             
-    def updateTctoken(self, node):  #直接处理xmpp node，
-
-        tctoken = None
-        tokens = node.getChild("tokens")
-        if tokens:
-            token = tokens.getAllChildren()[0]
-            if token["type"]=="trusted_contact":            
-                if node["from"].endswith("lid"):
-                    jid = node["sender_pn"]
-                    lid = node["from"]
-                else:
-                    jid = node["from"]
-                    lid = node["sender_lid"]
-                tctoken = token.getData()
-                tctoken_ts=int(token.getAttributeValue("t"))
-    
+    def updateTctoken(self, jid=None, lid=None, tctoken=None, tctoken_ts=None):
         if tctoken is None:
-            return 
-        
+            return False
+
         if tctoken_ts is None:
             tctoken_ts = int(time.time())
 
+        c = self.dbConn.cursor()
+        if self.findContact(jid, lid):
+            if jid is not None and lid is not None:
+                c.execute("UPDATE contact SET tctoken=?, tctoken_ts=? WHERE jid=? OR lid=?",
+                          (tctoken, tctoken_ts, jid, lid))
+            elif jid is not None:
+                c.execute("UPDATE contact SET tctoken=?, tctoken_ts=? WHERE jid=?",
+                          (tctoken, tctoken_ts, jid))
+            else:
+                c.execute("UPDATE contact SET tctoken=?, tctoken_ts=? WHERE lid=?",
+                          (tctoken, tctoken_ts, lid))
+        else:
+            c.execute("INSERT INTO contact(jid, lid, tctoken, tctoken_ts) VALUES(?, ?, ?, ?)",
+                      (jid, lid, tctoken, tctoken_ts))
 
-        if self.findContact(jid,lid):
-            if jid is not None:
-                q = "UPDATE contact SET tctoken=?,tctoken_ts=? WHERE jid=?"
-                self.dbConn.cursor().execute(q, (tctoken,tctoken_ts,jid))            
-            elif lid is not None:
-                q = "UPDATE contact SET tctoken=?,tctoken_ts=? WHERE lid=?"
-                self.dbConn.cursor().execute(q, (tctoken,tctoken_ts,lid))
-            self.dbConn.commit()
-        else:            
-            q = "insert into contact(jid,lid,tctoken,tctoken_ts) VALUES(?,?,?,?)"
-            self.dbConn.cursor().execute(q, (jid,lid,tctoken,tctoken_ts))                
-            self.dbConn.commit()
-                                            
+        self.dbConn.commit()
         return True                        
 
     def getTctoken(self,jid=None,lid=None):               
