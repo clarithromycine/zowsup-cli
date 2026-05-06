@@ -46,31 +46,30 @@ class LiteContactStore(TaskMsgStore):
 
         if jid is None and lid is None:
             return False
-                
-        if jid is not None:
-            if not jid.endswith("s.whatsapp.net"):
-                return False
-            
-            q = "SELECT jid FROM contact WHERE jid = ?"
-            c = self.dbConn.cursor()
-            c.execute(q, (jid, ))
-            if c.fetchone():                                      
-                return True
-            else:            
-                return False            
-
-        elif lid is not None:
+        
+        found = False
+        
+        if  lid is not None:
             if not lid.endswith("lid"):
                 return False
             q = "SELECT lid FROM contact WHERE lid = ?"
             c = self.dbConn.cursor()
             c.execute(q, (lid, ))     
             if c.fetchone():                                      
-                return True
-            else:            
-                return False                 
-
-        return False     
+                found = True
+        
+        if not found:                
+            if jid is not None:
+                if not jid.endswith("s.whatsapp.net"):
+                    return False
+                                
+                q = "SELECT jid FROM contact WHERE jid = ?"
+                c = self.dbConn.cursor()
+                c.execute(q, (jid, ))
+                if c.fetchone():                                      
+                    found = True
+                  
+        return found
                                                     
     def removeContact(self,jid,lid):
 
