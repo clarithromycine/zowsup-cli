@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Layout, Menu, Badge, Tooltip, Typography, Space, Button } from 'antd'
+import { Layout, Menu, Badge, Tooltip, Typography, Space, Button, Segmented } from 'antd'
 import logoSrc from '../../assets/zowsup-logo.png'
 import {
   DashboardOutlined,
@@ -7,6 +7,7 @@ import {
   WifiOutlined,
   DisconnectOutlined,
   RobotOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -111,7 +112,16 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           }}
         >
           <Text strong style={{ fontSize: 16 }}>
-          
+          {['/','','/logs'].includes(location.pathname) && (
+            <Segmented
+              value={location.pathname === '/logs' ? '/logs' : '/'}
+              onChange={(val) => navigate(val as string)}
+              options={[
+                { value: '/', label: <span><DashboardOutlined style={{ marginRight: 4 }} />{t('nav.dashboard')}</span> },
+                { value: '/logs', label: <span><FileTextOutlined style={{ marginRight: 4 }} />{t('nav.botLogs')}</span> },
+              ]}
+            />
+          )}
           </Text>
           <Space size={20}>
             {/* Language toggle */}

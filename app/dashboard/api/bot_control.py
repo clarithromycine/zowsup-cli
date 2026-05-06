@@ -205,8 +205,10 @@ def post_login_linkcode():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding='utf-8',
             bufsize=1,
             cwd=str(Path.cwd()),
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
         )
     except OSError as exc:
         logger.error("Failed to start regwithlinkcode.py: %s", exc)
@@ -306,8 +308,10 @@ def post_bot_start():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding='utf-8',
             bufsize=1,
             cwd=str(Path.cwd()),
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
         )
         _write_pid_file(_start_proc.pid)
         logger.info("Bot start subprocess launched, PID=%s, phone=%s", _start_proc.pid, phone)
@@ -415,17 +419,19 @@ def get_start_stream():
 def _start_drain_thread(proc: "subprocess.Popen") -> None:
     """Start a daemon thread that drains proc.stdout until the process exits.
 
-    This prevents the OS pipe buffer from filling up (typically 64 KB on
-    Windows) which would block any print/logging call inside the bot and
-    cause it to hang silently.
+    Draining prevents the OS pipe buffer (typically 64 KB on Windows) from
+    filling up and blocking the bot.  Log lines are NOT forwarded to the
+    WebSocket room here — the file-tail loop in websocket.py already reads
+    logs/zowsup.log, so forwarding stdout would cause every line to appear
+    twice (bot writes to both StreamHandler and FileHandler simultaneously).
     """
     if proc is None or proc.stdout is None:
         return
 
     def _drain():
         try:
-            for _ in proc.stdout:  # read & discard lines until EOF
-                pass
+            for _ in proc.stdout:
+                pass  # consume to prevent pipe-buffer stall; do not re-emit
         except Exception:
             pass
 

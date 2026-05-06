@@ -126,15 +126,15 @@ class LiteContactStore(TaskMsgStore):
 
         c = self.dbConn.cursor()
         if self.findContact(jid, lid):
-            if jid is not None and lid is not None:
+            if lid is not None and jid is not None:
                 c.execute("UPDATE contact SET tctoken=?, tctoken_ts=? WHERE jid=? OR lid=?",
                           (tctoken, tctoken_ts, jid, lid))
-            elif jid is not None:
-                c.execute("UPDATE contact SET tctoken=?, tctoken_ts=? WHERE jid=?",
-                          (tctoken, tctoken_ts, jid))
-            else:
+            elif lid is not None:
                 c.execute("UPDATE contact SET tctoken=?, tctoken_ts=? WHERE lid=?",
                           (tctoken, tctoken_ts, lid))
+            else:
+                c.execute("UPDATE contact SET tctoken=?, tctoken_ts=? WHERE jid=?",
+                          (tctoken, tctoken_ts, jid))
         else:
             c.execute("INSERT INTO contact(jid, lid, tctoken, tctoken_ts) VALUES(?, ?, ?, ?)",
                       (jid, lid, tctoken, tctoken_ts))

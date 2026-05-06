@@ -53,8 +53,18 @@ interface DashboardState {
   globalStrategy: StrategyConfig
   strategyHistory: StrategyRecord[]
 
+  // Logs
+  botLogs: BotLogEntry[]
+
   // UI
   siderCollapsed: boolean
+}
+
+export interface BotLogEntry {
+  ts: string
+  level: string
+  logger: string
+  message: string
 }
 
 interface DashboardActions {
@@ -84,6 +94,10 @@ interface DashboardActions {
   setStrategyHistory: (history: StrategyRecord[]) => void
 
   setSiderCollapsed: (v: boolean) => void
+
+  appendBotLog: (entry: BotLogEntry) => void
+  appendBotLogs: (entries: BotLogEntry[]) => void
+  clearBotLogs: () => void
 }
 
 type StoreState = DashboardState & DashboardActions
@@ -125,6 +139,8 @@ export const useDashboardStore = create<StoreState>()(
     strategyHistory: [],
 
     siderCollapsed: false,
+
+    botLogs: [],
 
     // ---- Actions ----
     setApiToken: (token) =>
@@ -255,6 +271,23 @@ export const useDashboardStore = create<StoreState>()(
     setSiderCollapsed: (v) =>
       set((s) => {
         s.siderCollapsed = v
+      }),
+
+    appendBotLog: (entry) =>
+      set((s) => {
+        s.botLogs.push(entry)
+        if (s.botLogs.length > 500) s.botLogs.shift()
+      }),
+
+    appendBotLogs: (entries) =>
+      set((s) => {
+        s.botLogs.push(...entries)
+        if (s.botLogs.length > 500) s.botLogs.splice(0, s.botLogs.length - 500)
+      }),
+
+    clearBotLogs: () =>
+      set((s) => {
+        s.botLogs = []
       }),
   })),
 )

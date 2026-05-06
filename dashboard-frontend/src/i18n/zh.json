@@ -31,7 +31,8 @@
   "nav": {
     "dashboard": "仪表板",
     "strategy": "策略管理",
-    "botManagement": "Bot 管理"
+    "botManagement": "Bot 管理",
+    "botLogs": "实时日志"
   },
   "header": {
     "botOnline": "Bot 在线",

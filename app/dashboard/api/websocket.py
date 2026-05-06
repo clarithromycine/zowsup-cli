@@ -21,9 +21,11 @@ Background monitor:
 
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,96 @@ socketio: Optional["SocketIO"] = None
 
 _monitor_thread: Optional[threading.Thread] = None
 _monitor_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Bot log streaming — tail logs/zowsup.log and push to "logs" WebSocket room
+# ---------------------------------------------------------------------------
+
+_LOG_MAX_BUFFER = 500  # ring buffer for late-joining clients
+_BOT_LOG_FILE = Path("logs") / "zowsup.log"
+
+_log_buffer: list = []
+_log_buffer_lock = threading.Lock()
+_tail_thread: Optional[threading.Thread] = None
+
+# Matches lines written by ShortenedNameFormatter:
+# [2026-05-06 14:46:42] logger_name              INFO     [file.py:12] message
+_LOG_LINE_RE = re.compile(
+    r'^\[(\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}))\]\s+(\S+)\s+(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+(?:\[\S+:\d+\]\s+)?(.+)$'
+)
+
+
+def _parse_log_line(line: str) -> Optional[dict]:
+    """Return a structured entry dict or None if the line cannot be parsed."""
+    m = _LOG_LINE_RE.match(line.rstrip())
+    if not m:
+        return None
+    return {
+        "ts": m.group(2),       # HH:MM:SS
+        "level": m.group(4),
+        "logger": m.group(3),
+        "message": m.group(5),
+    }
+
+
+def _push_log_entry(entry: dict) -> None:
+    """Buffer and emit a single log entry."""
+    with _log_buffer_lock:
+        _log_buffer.append(entry)
+        if len(_log_buffer) > _LOG_MAX_BUFFER:
+            _log_buffer.pop(0)
+    if socketio is not None:
+        socketio.emit("bot_log", entry, room="logs")
+
+
+def _tail_log_file_loop() -> None:
+    """
+    Background daemon: tail BOT_LOG_FILE and push new lines to the logs room.
+    Re-opens the file when it is rotated (size shrinks or inode changes).
+    """
+    log_path = _BOT_LOG_FILE
+    last_inode = None
+    last_size = 0
+    fh = None
+
+    while True:
+        time.sleep(0.5)
+        try:
+            if not log_path.exists():
+                if fh:
+                    fh.close()
+                    fh = None
+                last_inode = None
+                last_size = 0
+                continue
+
+            stat = log_path.stat()
+            cur_inode = stat.st_ino if hasattr(stat, 'st_ino') else 0
+            cur_size = stat.st_size
+
+            # Detect rotation: file shrank or inode changed
+            if fh is None or cur_inode != last_inode or cur_size < last_size:
+                if fh:
+                    fh.close()
+                fh = open(log_path, 'r', encoding='utf-8', errors='replace')
+                fh.seek(0, 2)  # seek to end — don't replay old logs on reconnect
+                last_inode = cur_inode
+                last_size = cur_size
+                continue
+
+            # Read any new lines
+            for raw in fh:
+                entry = _parse_log_line(raw)
+                if entry:
+                    _push_log_entry(entry)
+            last_size = log_path.stat().st_size
+        except Exception:
+            if fh:
+                try:
+                    fh.close()
+                except Exception:
+                    pass
+            fh = None
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +184,20 @@ def _register_events(sio: "SocketIO") -> None:
     def on_disconnect():
         logger.debug("WebSocket client disconnected")
 
+    @sio.on("subscribe_logs")
+    def on_subscribe_logs():
+        join_room("logs")
+        # Send buffered entries so the client gets history immediately
+        with _log_buffer_lock:
+            snapshot = list(_log_buffer)
+        sio.emit("bot_log_snapshot", snapshot)
+        logger.debug("WS client subscribed to logs room")
+
+    @sio.on("unsubscribe_logs")
+    def on_unsubscribe_logs():
+        leave_room("logs")
+        logger.debug("WS client unsubscribed from logs room")
+
     @sio.on("subscribe_user")
     def on_subscribe_user(data):
         jid = (data or {}).get("jid", "")
@@ -116,20 +222,28 @@ def start_monitor_thread(db_path: str) -> None:
     Start the background thread that polls for new chat_messages and emits
     new_message WebSocket events.  Idempotent — safe to call multiple times.
     """
-    global _monitor_thread
+    global _monitor_thread, _tail_thread
     if os.environ.get("TESTING") or os.environ.get("PYTEST_CURRENT_TEST"):
         return
     with _monitor_lock:
-        if _monitor_thread and _monitor_thread.is_alive():
-            return
-        _monitor_thread = threading.Thread(
-            target=_monitor_loop,
-            args=(db_path,),
-            daemon=True,
-            name="ws-db-monitor",
-        )
-        _monitor_thread.start()
-    logger.info("WebSocket DB-monitor thread started (poll interval: 2 s)")
+        if not (_monitor_thread and _monitor_thread.is_alive()):
+            _monitor_thread = threading.Thread(
+                target=_monitor_loop,
+                args=(db_path,),
+                daemon=True,
+                name="ws-db-monitor",
+            )
+            _monitor_thread.start()
+            logger.info("WebSocket DB-monitor thread started (poll interval: 2 s)")
+
+        if not (_tail_thread and _tail_thread.is_alive()):
+            _tail_thread = threading.Thread(
+                target=_tail_log_file_loop,
+                daemon=True,
+                name="ws-log-tail",
+            )
+            _tail_thread.start()
+            logger.info("WebSocket log-tail thread started (file: %s)", _BOT_LOG_FILE)
 
 
 def _monitor_loop(db_path: str) -> None:

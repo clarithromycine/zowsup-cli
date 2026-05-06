@@ -118,7 +118,7 @@ class AIService:
                     model=model,
                     auth_mode=auth_mode
                 )
-                logger.info(f"✓ Initialized GLM backend: model={model}, auth_mode={auth_mode}")
+                logger.info("Initialized GLM backend: model=%s, auth_mode=%s", model, auth_mode)
                 return backend
             
             # QWEN backend

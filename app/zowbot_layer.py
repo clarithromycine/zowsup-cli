@@ -400,7 +400,7 @@ class ZowBotLayer(YowInterfaceLayer):
                 for  item in entity.collections:
                     collectionNames.append(item["name"])
             self.logger.info("Notification: Received a ServerSync Notification, collections=%s" % ",".join(collectionNames))
-            self.syncData([','.join(collectionNames)] ,{})
+            await self.syncData([','.join(collectionNames)] ,{})
             
         if isinstance(entity,AccountSyncNotificationProtocolEntity):
             self.logger.info("Notification: Received a AccountSync Notification")            

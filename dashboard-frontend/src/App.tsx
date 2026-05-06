@@ -6,6 +6,7 @@ import AppLayout from './components/Layout/AppLayout'
 import DashboardPage from './pages/DashboardPage'
 import StrategyPage from './pages/StrategyPage'
 import BotLoginPage from './pages/BotLoginPage'
+import BotLogsPage from './pages/BotLogsPage'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useSSE } from './hooks/useSSE'
 import { setApiToken, getApiToken } from './api/client'
@@ -23,6 +24,7 @@ function AppInner() {
       <AppLayout>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/logs" element={<BotLogsPage />} />
           <Route path="/strategy" element={<StrategyPage />} />
           <Route path="/login" element={<BotLoginPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

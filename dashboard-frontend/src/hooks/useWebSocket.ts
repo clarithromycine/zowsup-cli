@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { io, Socket } from 'socket.io-client'
 import { useDashboardStore } from '../store'
 import type { WsNewMessagePayload, WsProfileUpdatedPayload, WsStrategyAppliedPayload } from '../types'
+import type { BotLogEntry } from '../store'
 
 /**
  * Manages a Socket.IO connection with auto-reconnect.
@@ -20,6 +21,8 @@ export function useWebSocket(): void {
   const setGlobalStrategy = useDashboardStore((s) => s.setGlobalStrategy)
   const incrementUnread = useDashboardStore((s) => s.incrementUnread)
   const updateContactAvatar = useDashboardStore((s) => s.updateContactAvatar)
+  const appendBotLog = useDashboardStore((s) => s.appendBotLog)
+  const appendBotLogs = useDashboardStore((s) => s.appendBotLogs)
 
   // Connect once on mount
   useEffect(() => {
@@ -34,6 +37,8 @@ export function useWebSocket(): void {
 
     socket.on('connect', () => {
       setWsConnected(true)
+      // Subscribe to log room on every (re)connect
+      socket.emit('subscribe_logs')
     })
 
     socket.on('disconnect', () => {
@@ -69,6 +74,14 @@ export function useWebSocket(): void {
 
     socket.on('avatar_updated', (payload: { jid: string; avatar_url: string }) => {
       updateContactAvatar(payload.jid, payload.avatar_url)
+    })
+
+    socket.on('bot_log', (entry: BotLogEntry) => {
+      appendBotLog(entry)
+    })
+
+    socket.on('bot_log_snapshot', (entries: BotLogEntry[]) => {
+      appendBotLogs(entries)
     })
 
     return () => {

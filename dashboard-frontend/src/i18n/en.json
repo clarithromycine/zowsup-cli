@@ -32,7 +32,8 @@
   "nav": {
     "dashboard": "Dashboard",
     "strategy": "Strategy",
-    "botManagement": "Bot Management"
+    "botManagement": "Bot Management",
+    "botLogs": "Live Logs"
   },
   "header": {
     "botOnline": "Bot online",
