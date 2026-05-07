@@ -112,6 +112,24 @@ const ChatHistory: React.FC = () => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0
   }, [selectedJid])
 
+  // scaleY(-1) flips the visual axis. React's onWheel is passive (preventDefault is a no-op),
+  // so we must use a native non-passive listener to intercept and reverse wheel direction.
+  // Depend on messagesLoading so the effect re-runs once the scroll div actually renders
+  // (it is absent during loading/empty states, so scrollRef.current would be null on first mount).
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      // In scaleY(-1): scrollTop increase = visual-up = older messages.
+      // Wheel-up (deltaY < 0): -= negative → scrollTop increases → older ✓
+      // Wheel-down (deltaY > 0): -= positive → scrollTop decreases → newer ✓
+      el.scrollTop -= e.deltaY
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [messagesLoading])
+
   async function handlePageChange(page: number) {
     if (!selectedJid) return
     setMessagesLoading(true)
@@ -166,13 +184,25 @@ const ChatHistory: React.FC = () => {
       */}
       <div
         ref={scrollRef}
-        style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', transform: 'scaleY(-1)' }}
-        onWheel={(e) => {
-          // scaleY(-1) flips the visual axis but not the scroll axis, so the
-          // wheel direction feels inverted. Intercept and reverse it manually.
-          e.preventDefault()
+        tabIndex={0}
+        style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', transform: 'scaleY(-1)', outline: 'none' }}
+        onKeyDown={(e) => {
+          // PageUp/PageDown and arrow keys are also inverted by scaleY(-1); reverse them.
           const el = e.currentTarget
-          el.scrollTop -= e.deltaY
+          const pageAmount = el.clientHeight * 0.9
+          if (e.key === 'PageUp') {
+            e.preventDefault()
+            el.scrollTop += pageAmount
+          } else if (e.key === 'PageDown') {
+            e.preventDefault()
+            el.scrollTop -= pageAmount
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            el.scrollTop += 60
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            el.scrollTop -= 60
+          }
         }}
       >
         {messages.map((msg) => (

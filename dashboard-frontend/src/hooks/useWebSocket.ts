@@ -108,7 +108,14 @@ export function useWebSocket(): void {
       appendBotLogs(entries)
     })
 
+    // Poll bot list every 10 s so the log filter dropdown stays current
+    const botListInterval = setInterval(() => {
+      const { apiToken } = useDashboardStore.getState()
+      fetchBotList(apiToken)
+    }, 10_000)
+
     return () => {
+      clearInterval(botListInterval)
       socket.disconnect()
       socketRef.current = null
     }

@@ -98,11 +98,11 @@ const BotLogsPage: React.FC = () => {
             onChange={(v) => setSelectedLogBotId(v === 'ALL' ? null : v)}
             options={[
               { value: 'ALL', label: '全部Bot' },
-              ...activeBots.map((b) => ({
+              ...activeBots.filter((b) => b.running).map((b) => ({
                 value: b.phone,
                 label: (
                   <span>
-                    <RobotOutlined style={{ marginRight: 4, color: b.running ? '#52c41a' : '#aaa' }} />
+                    <RobotOutlined style={{ marginRight: 4, color: '#52c41a' }} />
                     {b.phone}
                   </span>
                 ),

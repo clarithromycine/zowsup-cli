@@ -93,16 +93,19 @@ def get_bot_status():
 @bot_bp.get("/list")
 def get_bot_list():
     """Return status of all known bot accounts."""
+    from app.dashboard.utils.bot_status import _pid_alive
     statuses = read_all_statuses()
     result = []
     for s in statuses:
+        pid = s.get("pid")
+        actually_running = bool(s.get("running") and pid and _pid_alive(pid))
         uptime = None
-        if s.get("running") and s.get("started_at"):
+        if actually_running and s.get("started_at"):
             uptime = int(time.time() - s["started_at"])
         result.append({
-            "running": s.get("running", False),
+            "running": actually_running,
             "jid": s.get("jid"),
-            "pid": s.get("pid"),
+            "pid": pid,
             "phone": s.get("phone"),
             "started_at": s.get("started_at"),
             "uptime_seconds": uptime,
