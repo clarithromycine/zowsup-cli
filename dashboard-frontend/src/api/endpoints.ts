@@ -23,6 +23,7 @@ export async function fetchHealth(): Promise<{ status: string }> {
 export interface ContactSummary {
   user_jid: string
   display_name?: string | null
+  push_name?: string | null
   last_message: string | null
   last_timestamp: number | null
   message_count: number

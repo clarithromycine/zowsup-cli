@@ -14,6 +14,7 @@ import type {
 interface ContactEntry {
   jid: string
   display_name: string
+  push_name?: string | null
   last_message: string | null
   last_timestamp: number | null
   unread: number
@@ -229,6 +230,9 @@ export const useDashboardStore = create<StoreState>()(
           c.last_message = msg.content
           c.last_timestamp = msg.timestamp
           if (msg.bot_jid) c.bot_jid = msg.bot_jid
+          // Update push_name from incoming message notify
+          if (msg.direction === 'in' && !msg.user_jid.endsWith('@g.us') && msg.notify)
+            c.push_name = msg.notify
         } else {
           // Brand-new contact — add to list
           s.contacts.push({
@@ -236,6 +240,7 @@ export const useDashboardStore = create<StoreState>()(
             display_name: msg.user_jid
               .replace(/@s\.whatsapp\.net$/, '')
               .replace(/@.*$/, ''),
+            push_name: msg.direction === 'in' && !msg.user_jid.endsWith('@g.us') ? (msg.notify ?? null) : null,
             last_message: msg.content,
             last_timestamp: msg.timestamp,
             unread: 0,

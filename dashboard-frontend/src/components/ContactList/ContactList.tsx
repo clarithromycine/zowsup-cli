@@ -16,15 +16,25 @@ function isGroup(jid: string): boolean {
 }
 
 /**
- * Return the display label for a contact entry.
- * Priority: display_name from DB → JID-derived number/id.
+ * Return primary display name and optional secondary note for a contact.
+ * - Individual with push_name  → primary = push_name,  secondary = number
+ * - Group with display_name    → primary = display_name, secondary = group-id short
+ * - Fallback                   → primary = jid short,   secondary = null
  */
-function contactLabel(contact: { jid: string; display_name: string }): string {
-  if (contact.display_name && contact.display_name !== contact.jid) {
-    return contact.display_name
+function contactNames(contact: { jid: string; display_name: string; push_name?: string | null }): {
+  primary: string
+  secondary: string | null
+} {
+  const short = contact.jid.replace(/@.*$/, '')
+  // Individual: prefer push_name
+  if (!contact.jid.endsWith('@g.us') && contact.push_name) {
+    return { primary: contact.push_name, secondary: short }
   }
-  // Fall back to stripping the JID suffix
-  return contact.jid.replace(/@.*$/, '')
+  // Group or individual with display_name stored
+  if (contact.display_name && contact.display_name !== short) {
+    return { primary: contact.display_name, secondary: null }
+  }
+  return { primary: short, secondary: null }
 }
 
 /**
@@ -58,6 +68,7 @@ const ContactList: React.FC = () => {
               display_name: c.display_name
                 ? c.display_name
                 : c.user_jid.replace(/@.*$/, ''),
+              push_name: c.push_name ?? null,
               last_message: c.last_message,
               last_timestamp: c.last_timestamp,
               unread: 0,
@@ -74,9 +85,15 @@ const ContactList: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const filtered = contacts.filter((c) =>
-    contactLabel(c).toLowerCase().includes(search.toLowerCase()),
-  )
+  const filtered = contacts.filter((c) => {
+    const { primary } = contactNames(c)
+    const q = search.toLowerCase()
+    return (
+      primary.toLowerCase().includes(q) ||
+      c.jid.replace(/@.*$/, '').includes(q) ||
+      (c.push_name ?? '').toLowerCase().includes(q)
+    )
+  })
 
   async function handleSelect(jid: string) {
     if (jid === selectedJid) return
@@ -151,9 +168,16 @@ const ContactList: React.FC = () => {
                   </Badge>
                 }
                 title={
-                  <Text strong style={{ fontSize: 13 }}>
-                    {contactLabel(contact)}
-                  </Text>
+                  <span style={{ display: 'flex', alignItems: 'baseline', gap: 4, flexWrap: 'wrap' }}>
+                    <Text strong style={{ fontSize: 13 }}>
+                      {contactNames(contact).primary}
+                    </Text>
+                    {contactNames(contact).secondary && (
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        ({contactNames(contact).secondary})
+                      </Text>
+                    )}
+                  </span>
                 }
                 description={
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

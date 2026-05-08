@@ -141,7 +141,7 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
           boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
         }}
       >
-        {(participantLabel || msg.notify) && msg.direction === 'in' && (
+        {participantLabel && msg.direction === 'in' && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 8 }}>
             {participantLabel && (
               <Text

@@ -119,7 +119,16 @@ def contacts():
                 cm.timestamp      AS last_timestamp,
                 agg.message_count,
                 up.avatar_url,
-                up.display_name
+                up.display_name,
+                (
+                    SELECT cm2.notify
+                    FROM   chat_messages cm2
+                    WHERE  cm2.user_jid   = cm.user_jid
+                      AND  cm2.direction  = 'in'
+                      AND  cm2.notify IS NOT NULL
+                    ORDER  BY cm2.timestamp DESC
+                    LIMIT  1
+                ) AS push_name
             FROM chat_messages cm
             INNER JOIN (
                 SELECT user_jid,
@@ -134,6 +143,8 @@ def contacts():
         ).fetchall()
 
     contacts = [dict(r) for r in rows]
+    for c in contacts:
+        c["push_name"] = _fix_mojibake(c.get("push_name"))
 
     # Enqueue avatar fetch for contacts whose avatar is missing or stale
     try:
