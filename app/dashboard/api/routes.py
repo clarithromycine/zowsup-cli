@@ -13,7 +13,8 @@ Endpoints:
 """
 
 import logging
-from flask import Blueprint, current_app, jsonify, request
+import os
+from flask import Blueprint, current_app, jsonify, request, send_file, abort
 
 from app.dashboard.utils.db_init import get_db_connection, verify_db
 from app.dashboard.api.auth import check_bearer
@@ -44,8 +45,8 @@ def _count_online_bots() -> int:
 
 @bp.before_request
 def _check_auth():
-    """Enforce Bearer-token auth on every endpoint except /health."""
-    if request.endpoint == "api.health":
+    """Enforce Bearer-token auth on every endpoint except /health and /media/*."""
+    if request.endpoint in ("api.health", "api.serve_media"):
         return None
     return check_bearer()
 
@@ -107,7 +108,8 @@ def contacts():
                 cm.content        AS last_message,
                 cm.timestamp      AS last_timestamp,
                 agg.message_count,
-                up.avatar_url
+                up.avatar_url,
+                up.display_name
             FROM chat_messages cm
             INNER JOIN (
                 SELECT user_jid,
@@ -343,7 +345,7 @@ def chat_history():
 
         rows = conn.execute(
             "SELECT cm.id, cm.user_jid, cm.bot_jid, cm.direction, cm.content, cm.message_type, "
-            "       cm.timestamp, cm.created_at, at.urgency_level "
+            "       cm.timestamp, cm.created_at, cm.participant, cm.media_path, at.urgency_level "
             "FROM chat_messages cm "
             "LEFT JOIN ai_thoughts at ON at.message_id = cm.id "
             "WHERE cm.user_jid = ? "
@@ -359,6 +361,36 @@ def chat_history():
         "total": total,
         "messages": [dict(r) for r in rows],
     }), 200
+
+
+# ---------------------------------------------------------------------------
+# 1.14  GET /api/media/<filename>   — serve downloaded media files
+# ---------------------------------------------------------------------------
+
+@bp.route("/media/<path:filename>", methods=["GET"])
+def serve_media(filename: str):
+    """
+    Serve a previously downloaded media file from DOWNLOAD_PATH.
+
+    The frontend passes the basename of the file (no path traversal).
+    Only files that exist inside DOWNLOAD_PATH are served.
+    """
+    from conf.constants import SysVar
+
+    download_path = getattr(SysVar, "DOWNLOAD_PATH", None)
+    if not download_path:
+        abort(503, description="DOWNLOAD_PATH not configured")
+
+    # Resolve and guard against path-traversal
+    base = os.path.realpath(download_path)
+    target = os.path.realpath(os.path.join(base, filename))
+    if not target.startswith(base + os.sep) and target != base:
+        abort(400, description="Invalid path")
+
+    if not os.path.isfile(target):
+        abort(404, description="Media file not found")
+
+    return send_file(target)
 
 
 # ---------------------------------------------------------------------------

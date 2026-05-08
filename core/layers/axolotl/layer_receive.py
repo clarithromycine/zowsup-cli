@@ -179,8 +179,13 @@ class AxolotlReceivelayer(AxolotlBaseLayer):
             await self.toUpper(node)
             return True
         except exceptions.NoSessionException:
-            logger.warning("Got retry to %s, going to send a retry", encMessageProtocolEntity.getAuthor(False))            
-            return False
+            logger.warning("Got retry to %s, going to send a retry", encMessageProtocolEntity.getAuthor(False))
+            if node["id"] in self._retries and self._retries[node["id"]] >= 3:
+                logger.warning("Too many retries for group msg from %s, giving up", encMessageProtocolEntity.getAuthor(False))
+                await self.toLower(OutgoingReceiptProtocolEntity(node["id"], node["from"], participant=node["participant"]).toProtocolTreeNode())
+            else:
+                await self.send_retry(node, self.manager.registration_id)
+            return True  # handled — prevent fallback plain receipt in handleEncMessage
 
     def parseAndHandleMessageProto(self, encMessageProtocolEntity, serializedData) -> Any:
         m = Message()

@@ -110,6 +110,29 @@ def save_avatar_url(jid: str, url: str, db_path: str) -> None:
         conn.close()
 
 
+def save_display_name(jid: str, name: str, db_path: str) -> None:
+    """
+    Persist *name* as the display name for *jid* in the dashboard DB.
+
+    Creates a minimal ``user_profiles`` row if none exists yet.
+    """
+    if not name:
+        return
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO user_profiles (user_jid, total_interactions) VALUES (?, 0)",
+            (jid,),
+        )
+        conn.execute(
+            "UPDATE user_profiles SET display_name = ? WHERE user_jid = ?",
+            (name, jid),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def notify_avatar_updated(jid: str, url: str) -> None:
     """
     Write a {jid, url} entry to ``data/avatar_updates.json`` so the Flask

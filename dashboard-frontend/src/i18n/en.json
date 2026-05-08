@@ -49,17 +49,17 @@
     "offline": "Offline"
   },
   "dashboard": {
-    "contacts": "Contacts",
+    "contacts": "Sessions",
     "chatHistory": "Chat History",
     "userProfile": "User Profile",
     "statistics": "Statistics"
   },
   "contactList": {
-    "search": "Search contacts...",
-    "empty": "No contacts"
+    "search": "Search sessions...",
+    "empty": "No sessions"
   },
   "chatHistory": {
-    "selectContact": "Select a contact to view chat history",
+    "selectContact": "Select a session to view chat history",
     "loading": "Loading...",
     "empty": "No messages",
     "user": "User",

@@ -12,6 +12,8 @@ export interface ChatMessage {
   timestamp: number
   created_at: string
   urgency_level?: string | null
+  participant?: string | null
+  media_path?: string | null
 }
 
 export interface AIThought {

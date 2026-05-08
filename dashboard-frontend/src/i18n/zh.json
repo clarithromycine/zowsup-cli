@@ -48,17 +48,17 @@
     "offline": "离线"
   },
   "dashboard": {
-    "contacts": "联系人",
+    "contacts": "会话列表",
     "chatHistory": "聊天记录",
     "userProfile": "用户画像",
     "statistics": "统计数据"
   },
   "contactList": {
-    "search": "搜索联系人",
-    "empty": "暂无联系人"
+    "search": "搜索会话",
+    "empty": "暂无会话"
   },
   "chatHistory": {
-    "selectContact": "请选择一个联系人查看聊天记录",
+    "selectContact": "请选择一个会话查看聊天记录",
     "loading": "加载中...",
     "empty": "暂无聊天记录",
     "user": "用户",

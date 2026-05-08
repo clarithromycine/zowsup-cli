@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { List, Input, Badge, Avatar, Typography, Spin, Empty, Tag, Tooltip } from 'antd'
-import { UserOutlined, SearchOutlined, RobotOutlined } from '@ant-design/icons'
+import { UserOutlined, TeamOutlined, SearchOutlined, RobotOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { fetchChatHistory, fetchContacts, fetchContactAvatar, refreshContactAvatar } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
@@ -10,17 +10,27 @@ const { Text } = Typography
 
 // ---- Helpers ----
 
-function jidToName(jid: string): string {
-  // Strip WhatsApp JID suffix for display
-  return jid.replace(/@s\.whatsapp\.net$/, '').replace(/@.*$/, '')
+/** True if this JID is a group conversation. */
+function isGroup(jid: string): boolean {
+  return jid.endsWith('@g.us')
 }
 
 /**
- * ContactList — shows all known contacts populated from chat history.
- *
- * In a real deployment the backend would provide a contacts endpoint.  Here
- * we derive the contact list from the first page of chat history per user,
- * stored in the Zustand store.
+ * Return the display label for a contact entry.
+ * Priority: display_name from DB → JID-derived number/id.
+ */
+function contactLabel(contact: { jid: string; display_name: string }): string {
+  if (contact.display_name && contact.display_name !== contact.jid) {
+    return contact.display_name
+  }
+  // Fall back to stripping the JID suffix
+  return contact.jid.replace(/@.*$/, '')
+}
+
+/**
+ * ContactList — shows all known sessions (groups + individuals) populated
+ * from chat history.  Groups show a TeamOutlined icon; individuals show
+ * UserOutlined.  Display names are resolved via the bot and stored in DB.
  */
 const ContactList: React.FC = () => {
   const { t } = useTranslation()
@@ -45,9 +55,9 @@ const ContactList: React.FC = () => {
           setContacts(
             list.map((c) => ({
               jid: c.user_jid,
-              display_name: c.user_jid
-                .replace(/@s\.whatsapp\.net$/, '')
-                .replace(/@.*$/, ''),
+              display_name: c.display_name
+                ? c.display_name
+                : c.user_jid.replace(/@.*$/, ''),
               last_message: c.last_message,
               last_timestamp: c.last_timestamp,
               unread: 0,
@@ -65,7 +75,7 @@ const ContactList: React.FC = () => {
   }, [])
 
   const filtered = contacts.filter((c) =>
-    jidToName(c.jid).toLowerCase().includes(search.toLowerCase()),
+    contactLabel(c).toLowerCase().includes(search.toLowerCase()),
   )
 
   async function handleSelect(jid: string) {
@@ -134,14 +144,15 @@ const ContactList: React.FC = () => {
                   <Badge count={contact.unread} size="small">
                     <Avatar
                       src={contact.avatar_url ?? undefined}
-                      icon={<UserOutlined />}
+                      icon={isGroup(contact.jid) ? <TeamOutlined /> : <UserOutlined />}
                       size={36}
+                      style={isGroup(contact.jid) ? { backgroundColor: '#722ed1' } : undefined}
                     />
                   </Badge>
                 }
                 title={
                   <Text strong style={{ fontSize: 13 }}>
-                    {jidToName(contact.jid)}
+                    {contactLabel(contact)}
                   </Text>
                 }
                 description={

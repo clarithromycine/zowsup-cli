@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from 'react'
-import { Typography, Tag, Spin, Empty, Pagination, Tooltip } from 'antd'
-import { RobotOutlined, UserOutlined, AlertOutlined } from '@ant-design/icons'
+import React, { useEffect, useRef, useState } from 'react'
+import { Typography, Tag, Spin, Empty, Pagination, Tooltip, Image } from 'antd'
+import { RobotOutlined, UserOutlined, AlertOutlined, FileOutlined, AudioOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { fetchChatHistory } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
@@ -13,6 +13,83 @@ const _URGENCY_COLOR: Record<string, string> = {
   high: 'red',
   medium: 'orange',
   low: 'default',
+}
+
+/** Build a URL for a media file stored on the server.
+ *  media_path from the DB is an absolute local path; we only need the basename. */
+function mediaUrl(mediaPath: string): string {
+  // Strip Windows or POSIX directory portion, keep only the filename
+  const filename = mediaPath.replace(/^.*[\\/]/, '')
+  return `/api/media/${encodeURIComponent(filename)}`
+}
+
+/**
+ * Renders the appropriate media widget based on message_type + media_path.
+ * Falls back to a plain text label when the file isn't available yet.
+ */
+function MediaContent({ msg }: { msg: ChatMessage }) {
+  const [errored, setErrored] = useState(false)
+  const url = msg.media_path ? mediaUrl(msg.media_path) : null
+
+  if (!url || errored) {
+    // No file yet or failed to load — show placeholder label
+    return (
+      <Text type="secondary" style={{ fontSize: 13, fontStyle: 'italic' }}>
+        {msg.content}
+      </Text>
+    )
+  }
+
+  const mt = msg.message_type?.toUpperCase()
+
+  if (mt === 'IMAGE' || mt === 'STICKER') {
+    return (
+      <Image
+        src={url}
+        style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, display: 'block' }}
+        onError={() => setErrored(true)}
+        preview={mt === 'IMAGE'}
+        fallback=""
+      />
+    )
+  }
+
+  if (mt === 'VIDEO') {
+    return (
+      <video
+        src={url}
+        controls
+        style={{ maxWidth: 280, maxHeight: 200, borderRadius: 6, display: 'block' }}
+        onError={() => setErrored(true)}
+      />
+    )
+  }
+
+  if (mt === 'AUDIO') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <AudioOutlined style={{ color: '#1890ff' }} />
+        <audio controls src={url} style={{ height: 32 }} onError={() => setErrored(true)} />
+      </div>
+    )
+  }
+
+  if (mt === 'DOCUMENT') {
+    const filename = msg.media_path!.replace(/^.*[\\/]/, '')
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <FileOutlined />
+        <Text style={{ fontSize: 13 }}>{filename}</Text>
+      </a>
+    )
+  }
+
+  // Fallback for unknown media types
+  return (
+    <Text type="secondary" style={{ fontSize: 13, fontStyle: 'italic' }}>
+      {msg.content}
+    </Text>
+  )
 }
 
 function UrgencyTag({ level }: { level: string }) {
@@ -39,6 +116,11 @@ function SourceTag({ direction }: { direction: 'in' | 'out' }) {
 }
 
 function MessageItem({ msg }: { msg: ChatMessage }) {
+  // Strip JID suffix for display (e.g. "85291234567@s.whatsapp.net" → "85291234567")
+  const participantLabel = msg.participant
+    ? msg.participant.replace(/@.*$/, '')
+    : null
+
   return (
     <div
       style={{
@@ -59,9 +141,28 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
           boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
         }}
       >
-        <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {msg.content}
-        </Text>
+        {participantLabel && msg.direction === 'in' && (
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: '#722ed1',
+              display: 'block',
+              marginBottom: 2,
+            }}
+          >
+            {participantLabel}
+          </Text>
+        )}
+        {/* Render rich media for downloadable types, plain text otherwise */}
+        {msg.media_path
+          ? <MediaContent msg={msg} />
+          : (
+            <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {msg.content}
+            </Text>
+          )
+        }
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginTop: 4 }}>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <SourceTag direction={msg.direction} />

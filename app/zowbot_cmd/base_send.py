@@ -17,8 +17,11 @@ class BotSendCommand(BotCommand):
 
         to,*other = params
         isCompanion = "_" in self.bot.botId
-        jid = Jid.normalize(to)    
-        if not jid.endswith("@lid"):
+        jid = Jid.normalize(to)
+        if jid.endswith("@g.us"):
+            # Group JIDs need no contact-sync — send directly
+            await send_func(params, options)
+        elif not jid.endswith("@lid"):
             foundContact = self.bot.botLayer.db._store.findContact(jid)        
             if not foundContact and not isCompanion:      
                 try:          

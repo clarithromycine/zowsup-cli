@@ -180,7 +180,7 @@ def _migrate_bot_jid(conn) -> None:
 
 
 def _migrate_profile_overrides(conn) -> None:
-    """Add manual-override and avatar columns to user_profiles if they don't exist (idempotent)."""
+    """Add manual-override, avatar and display_name columns to user_profiles if they don't exist (idempotent)."""
     existing = {row[1] for row in conn.execute("PRAGMA table_info(user_profiles)").fetchall()}
     if "user_category_override" not in existing:
         conn.execute("ALTER TABLE user_profiles ADD COLUMN user_category_override TEXT")
@@ -190,6 +190,17 @@ def _migrate_profile_overrides(conn) -> None:
         conn.execute("ALTER TABLE user_profiles ADD COLUMN avatar_url TEXT")
     if "avatar_fetched_at" not in existing:
         conn.execute("ALTER TABLE user_profiles ADD COLUMN avatar_fetched_at INTEGER")
+    if "display_name" not in existing:
+        conn.execute("ALTER TABLE user_profiles ADD COLUMN display_name TEXT")
+
+
+def _migrate_participant(conn) -> None:
+    """Add participant and media_path columns to chat_messages if they don't exist (idempotent)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(chat_messages)").fetchall()}
+    if "participant" not in existing:
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN participant TEXT")
+    if "media_path" not in existing:
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN media_path TEXT")
 
 
 def init_db(db_path: str = DB_PATH) -> None:
@@ -214,6 +225,7 @@ def init_db(db_path: str = DB_PATH) -> None:
         _migrate_ai_thoughts_urgency(conn)
         _migrate_bot_jid(conn)
         _migrate_profile_overrides(conn)
+        _migrate_participant(conn)
         conn.commit()
         logger.info(f"Dashboard DB initialised at {db_path} (WAL mode)")
     except Exception:
