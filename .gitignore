@@ -22,3 +22,7 @@ data/dashboard.db
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/bot*.json
+data/bot*.pid
+data/bot.pid
+data/avatar*.json
