@@ -32,6 +32,7 @@
     "dashboard": "仪表板",
     "strategy": "策略管理",
     "botManagement": "Bot 管理",
+    "gui":"可视化界面",
     "botLogs": "实时日志"
   },
   "header": {

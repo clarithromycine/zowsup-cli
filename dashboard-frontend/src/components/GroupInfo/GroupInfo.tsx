@@ -13,6 +13,7 @@ import { CrownOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { fetchGroupInfo } from '../../api/endpoints'
 import type { GroupInfo as GroupInfoType, GroupMember } from '../../types'
+import { useDashboardStore } from '../../store'
 import { useTranslation } from 'react-i18next'
 
 interface Props {
@@ -25,6 +26,7 @@ const GroupInfo: React.FC<Props> = ({ jid }) => {
   const { t } = useTranslation()
   const [info, setInfo] = useState<GroupInfoType | null>(null)
   const [loading, setLoading] = useState(false)
+  const groupInfoRevision = useDashboardStore((s) => s.groupInfoRevision)
 
   useEffect(() => {
     if (!jid) return
@@ -34,7 +36,7 @@ const GroupInfo: React.FC<Props> = ({ jid }) => {
       .then(setInfo)
       .catch(() => setInfo(null))
       .finally(() => setLoading(false))
-  }, [jid])
+  }, [jid, groupInfoRevision])
 
   if (loading) {
     return (

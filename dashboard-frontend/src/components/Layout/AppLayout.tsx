@@ -117,7 +117,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               value={location.pathname === '/logs' ? '/logs' : '/'}
               onChange={(val) => navigate(val as string)}
               options={[
-                { value: '/', label: <span><DashboardOutlined style={{ marginRight: 4 }} />{t('nav.dashboard')}</span> },
+                { value: '/', label: <span><DashboardOutlined style={{ marginRight: 4 }} />{t('nav.gui')}</span> },
                 { value: '/logs', label: <span><FileTextOutlined style={{ marginRight: 4 }} />{t('nav.botLogs')}</span> },
               ]}
             />

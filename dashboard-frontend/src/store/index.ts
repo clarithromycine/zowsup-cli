@@ -71,6 +71,9 @@ interface DashboardState {
 
   // UI
   siderCollapsed: boolean
+
+  // Triggers GroupInfo re-fetch when a group message arrives
+  groupInfoRevision: number
 }
 
 export interface BotLogEntry {
@@ -162,6 +165,8 @@ export const useDashboardStore = create<StoreState>()(
     activeBots: [],
     selectedLogBotId: null,
 
+    groupInfoRevision: 0,
+
     // ---- Actions ----
     setApiToken: (token) =>
       set((s) => {
@@ -246,6 +251,10 @@ export const useDashboardStore = create<StoreState>()(
             unread: 0,
             bot_jid: msg.bot_jid ?? null,
           })
+        }
+        // Bump groupInfoRevision so GroupInfo re-fetches when a group message arrives
+        if (msg.user_jid.endsWith('@g.us')) {
+          s.groupInfoRevision += 1
         }
         // Re-sort by most recent message, keeping active JID visually tracked via selectedJid state
         s.contacts.sort((a: ContactEntry, b: ContactEntry) =>
