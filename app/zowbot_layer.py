@@ -1464,6 +1464,13 @@ class ZowBotLayer(YowInterfaceLayer):
             direction = "out" if messageProtocolEntity.fromme else "in"
             participant = messageProtocolEntity.getParticipant() or None
             notify = messageProtocolEntity.getNotify() or None
+            # Fix UTF-8 mojibake: protocol may deliver UTF-8 bytes decoded as
+            # Latin-1, producing Ð© sequences (same issue as group subject).
+            if notify:
+                try:
+                    notify = notify.encode("latin-1").decode("utf-8")
+                except (UnicodeEncodeError, UnicodeDecodeError):
+                    pass  # already valid Unicode
             # Download media to disk for displayable types
             db_message_type = "text"
             media_path: str | None = None

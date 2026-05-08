@@ -29,6 +29,16 @@ bp = Blueprint("api", __name__)
 logger = logging.getLogger(__name__)
 
 
+def _fix_mojibake(s: str | None) -> str | None:
+    """Fix UTF-8 text that was incorrectly decoded as Latin-1 (Ð© sequences)."""
+    if not s:
+        return s
+    try:
+        return s.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return s
+
+
 def _count_online_bots() -> int:
     """Return the number of currently running bots."""
     try:
@@ -361,7 +371,7 @@ def chat_history():
         "page": page,
         "page_size": page_size,
         "total": total,
-        "messages": [dict(r) for r in rows],
+        "messages": [{**dict(r), "notify": _fix_mojibake(r["notify"])} for r in rows],
     }), 200
 
 
@@ -913,6 +923,7 @@ def group_info():
                 m.pop("synced_at", None)
                 m.pop("participant_lid", None)
                 m.pop("msg_count", None)
+                m["notify"] = _fix_mojibake(m.get("notify"))
         else:
             # Fallback: derive members from chat_messages participants
             fallback_rows = conn.execute(
@@ -940,6 +951,8 @@ def group_info():
                 (jid,),
             ).fetchall()
             members = [dict(r) for r in fallback_rows]
+            for m in members:
+                m["notify"] = _fix_mojibake(m.get("notify"))
 
     return jsonify({
         "jid": jid,
