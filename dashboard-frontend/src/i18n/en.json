@@ -25,14 +25,14 @@
     "actions": "Actions",
     "copyAll": "Copy All",
     "copied": "Copied to clipboard",
-    "irreversible": "This action cannot be undone.",
-    "totalItems": "{{count}} items",
+    "irreversible": "This action cannot be undone.",    
     "totalItems": "{{count}} items"
   },
   "nav": {
     "dashboard": "Dashboard",
     "strategy": "Strategy",
     "botManagement": "Bot Management",
+    "gui":"GUI",
     "botLogs": "Live Logs"
   },
   "header": {
