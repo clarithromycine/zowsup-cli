@@ -174,7 +174,9 @@ export const useDashboardStore = create<StoreState>()(
 
     setContacts: (contacts) =>
       set((s) => {
-        s.contacts = contacts
+        s.contacts = [...contacts].sort(
+          (a: ContactEntry, b: ContactEntry) => (b.last_timestamp ?? 0) - (a.last_timestamp ?? 0)
+        )
       }),
 
     updateContactAvatar: (jid, avatar_url) =>
@@ -228,8 +230,8 @@ export const useDashboardStore = create<StoreState>()(
           c.last_timestamp = msg.timestamp
           if (msg.bot_jid) c.bot_jid = msg.bot_jid
         } else {
-          // Brand-new contact — add to top of the list
-          s.contacts.unshift({
+          // Brand-new contact — add to list
+          s.contacts.push({
             jid: msg.user_jid,
             display_name: msg.user_jid
               .replace(/@s\.whatsapp\.net$/, '')
@@ -240,6 +242,10 @@ export const useDashboardStore = create<StoreState>()(
             bot_jid: msg.bot_jid ?? null,
           })
         }
+        // Re-sort by most recent message, keeping active JID visually tracked via selectedJid state
+        s.contacts.sort((a: ContactEntry, b: ContactEntry) =>
+          (b.last_timestamp ?? 0) - (a.last_timestamp ?? 0)
+        )
       }),
 
     setMessagesLoading: (v) =>

@@ -23,7 +23,7 @@ const DashboardPage: React.FC = () => {
     <div style={{ padding: 16, height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* Top row — 3 columns */}
       <Row gutter={12} style={{ flex: '0 0 calc(60vh - 60px)' }}>
-        <Col flex="240px">
+        <Col flex="288px">
           <Card
             size="small"
             title={t('dashboard.contacts')}

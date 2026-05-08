@@ -141,20 +141,44 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
           boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
         }}
       >
-        {participantLabel && msg.direction === 'in' && (
-          <Text
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: '#722ed1',
-              display: 'block',
-              marginBottom: 2,
-            }}
-          >
-            {participantLabel}
-          </Text>
+        {(participantLabel || msg.notify) && msg.direction === 'in' && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 8 }}>
+            {participantLabel && (
+              <Text
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: '#722ed1',
+                  lineHeight: '14px',
+                  maxWidth: 120,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {participantLabel}
+              </Text>
+            )}
+            {msg.notify && (
+              <Text
+                style={{
+                  fontSize: 10,
+                  color: '#8c8c8c',
+                  lineHeight: '14px',
+                  maxWidth: 120,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  marginLeft: 'auto',
+                }}
+              >
+                {msg.notify}
+              </Text>
+            )}
+          </div>
         )}
         {/* Render rich media for downloadable types, plain text otherwise */}
+        <div>
         {msg.media_path
           ? <MediaContent msg={msg} />
           : (
@@ -163,6 +187,7 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
             </Text>
           )
         }
+        </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginTop: 4 }}>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <SourceTag direction={msg.direction} />

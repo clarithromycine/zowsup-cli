@@ -1,8 +1,8 @@
 {
-  "running": false,
-  "jid": null,
+  "running": true,
+  "jid": "2347072380768",
   "phone": "2347072380768",
-  "pid": 221344,
-  "started_at": null,
-  "updated_at": 1778213929.7983892
+  "pid": 217752,
+  "started_at": 1778218025.9752622,
+  "updated_at": 1778218025.9752622
 }

@@ -13,6 +13,7 @@ export interface ChatMessage {
   created_at: string
   urgency_level?: string | null
   participant?: string | null
+  notify?: string | null
   media_path?: string | null
 }
 

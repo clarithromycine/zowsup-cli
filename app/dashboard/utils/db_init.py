@@ -203,6 +203,13 @@ def _migrate_participant(conn) -> None:
         conn.execute("ALTER TABLE chat_messages ADD COLUMN media_path TEXT")
 
 
+def _migrate_notify(conn) -> None:
+    """Add notify column to chat_messages if it doesn't exist (idempotent)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(chat_messages)").fetchall()}
+    if "notify" not in existing:
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN notify TEXT")
+
+
 def init_db(db_path: str = DB_PATH) -> None:
     """
     Create tables, indexes, and enable WAL mode.
@@ -226,6 +233,7 @@ def init_db(db_path: str = DB_PATH) -> None:
         _migrate_bot_jid(conn)
         _migrate_profile_overrides(conn)
         _migrate_participant(conn)
+        _migrate_notify(conn)
         conn.commit()
         logger.info(f"Dashboard DB initialised at {db_path} (WAL mode)")
     except Exception:

@@ -1241,6 +1241,7 @@ class ZowBotLayer(YowInterfaceLayer):
     def _save_msg_to_dashboard(
         self, user_jid: str, direction: str, content: str,
         message_type: str = "text", participant: str | None = None,
+        notify: str | None = None,
         media_path: str | None = None,
     ) -> None:
         """
@@ -1248,6 +1249,7 @@ class ZowBotLayer(YowInterfaceLayer):
         Fire-and-forget — never raises, never crashes the caller.
         Called for every incoming/outgoing text/media message, independent of AI.
         participant: for group messages, the JID of the individual sender.
+        notify: display name (pushname) of the sender.
         media_path: absolute local path to a downloaded media file.
         """
         db_path = self._dashboard_db_path
@@ -1261,9 +1263,9 @@ class ZowBotLayer(YowInterfaceLayer):
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute(
                     "INSERT INTO chat_messages "
-                    "(user_jid, direction, content, message_type, timestamp, bot_jid, participant, media_path) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (user_jid, direction, content, message_type, int(_time.time()), self.bot.botId, participant, media_path),
+                    "(user_jid, direction, content, message_type, timestamp, bot_jid, participant, notify, media_path) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (user_jid, direction, content, message_type, int(_time.time()), self.bot.botId, participant, notify, media_path),
                 )
                 conn.commit()
             finally:
@@ -1415,6 +1417,7 @@ class ZowBotLayer(YowInterfaceLayer):
         if text and self._dashboard_db_path:
             direction = "out" if messageProtocolEntity.fromme else "in"
             participant = messageProtocolEntity.getParticipant() or None
+            notify = messageProtocolEntity.getNotify() or None
             # Download media to disk for displayable types
             db_message_type = "text"
             media_path: str | None = None
@@ -1449,7 +1452,7 @@ class ZowBotLayer(YowInterfaceLayer):
                     })
                 except Exception as dl_exc:
                     self.logger.warning("Media download failed for %s: %s", jid, dl_exc)
-            self._save_msg_to_dashboard(jid, direction, text, message_type=db_message_type, participant=participant, media_path=media_path)
+            self._save_msg_to_dashboard(jid, direction, text, message_type=db_message_type, participant=participant, notify=notify, media_path=media_path)
 
         # AI auto-reply processing (Phase 1.5: real API mode with message sending)
         if self.ai_service:

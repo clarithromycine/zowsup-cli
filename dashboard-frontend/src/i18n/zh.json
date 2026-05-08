@@ -144,6 +144,7 @@
     "loginFailed": "登录失败",
     "quickStart": "一键启动",
     "start": "启动",
+    "stop": "停止",
     "markFailed": "标记失败",
     "unmarkFailed": "取消标记",
     "exportSegment": "导出六段号",

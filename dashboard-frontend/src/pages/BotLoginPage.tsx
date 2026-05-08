@@ -278,13 +278,7 @@ const AccountsSection: React.FC = () => {
   const [exportText, setExportText] = useState('')
   const [exporting, setExporting] = useState(false)
 
-  // One-click start modal
-  const [startModalOpen, setStartModalOpen] = useState(false)
-  const [startPhone, setStartPhone] = useState('')
-  const [startLogs, setStartLogs] = useState<string[]>([])
-  const [startPhase, setStartPhase] = useState<'starting' | 'streaming' | 'done' | 'error'>('starting')
-  const esRef = useRef<EventSource | null>(null)
-  const logsBottomRef = useRef<HTMLDivElement>(null)
+  const esRef = useRef<Map<string, EventSource>>(new Map())
 
   const [msgApi, contextHolder] = message.useMessage()
 
@@ -304,10 +298,6 @@ const AccountsSection: React.FC = () => {
     load()
   }, [load])
 
-  useEffect(() => {
-    logsBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [startLogs])
-
   // Auto-refresh every 10 s so running status stays up to date
   useEffect(() => {
     const id = setInterval(load, 10_000)
@@ -319,64 +309,41 @@ const AccountsSection: React.FC = () => {
 
   // ── One-click start ──
   const handleQuickStart = async (phone: string) => {
-    esRef.current?.close()
-    setStartPhone(phone)
-    setStartLogs([])
-    setStartPhase('starting')
-    setStartModalOpen(true)
-
-    let alreadyRunning = false
+    // Close any existing SSE for this specific phone only
+    esRef.current.get(phone)?.close()
+    esRef.current.delete(phone)
+    setRowBusy(phone, true)
     try {
       const res = await postBotStart(phone)
       if (res.already_running) {
-        alreadyRunning = true
-        setStartModalOpen(false)
         msgApi.info(`Bot ${phone} 已在运行中`)
-        load()
+        await load()
         return
       }
-      setStartLogs([t('bot.startSuccess', { pid: res.pid })])
-      setStartPhase('streaming')
+      // Wait for the bot to actually reach connected state via SSE
+      await new Promise<void>((resolve, reject) => {
+        const token = getApiToken()
+        const params = new URLSearchParams({ phone })
+        if (token) params.set('token', token)
+        const es = new EventSource(`/api/bot/start-stream?${params}`)
+        esRef.current.set(phone, es)
+        es.addEventListener('status', (e) => {
+          try {
+            const p = JSON.parse(e.data) as { type: string; jid?: string; msg?: string }
+            if (p.type === 'connected') { es.close(); esRef.current.delete(phone); resolve() }
+            else if (p.type === 'timeout') { es.close(); esRef.current.delete(phone); resolve() }
+            else if (p.type === 'error') { es.close(); esRef.current.delete(phone); reject(new Error(p.msg ?? '启动失败')) }
+          } catch { /* ignore parse errors */ }
+        })
+        es.onerror = () => { es.close(); esRef.current.delete(phone); reject(new Error('连接中断')) }
+      })
+      msgApi.success(`Bot ${phone} 已连接`)
+      await load()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setStartLogs([t('bot.startFailed', { msg })])
-      setStartPhase('error')
-      return
-    }
-    if (alreadyRunning) return
-
-    const token = getApiToken()
-    const params = new URLSearchParams({ phone })
-    if (token) params.set('token', token)
-    const url = `/api/bot/start-stream?${params.toString()}`
-    const es = new EventSource(url)
-    esRef.current = es
-
-    es.addEventListener('log', (e) => setStartLogs((p) => [...p, e.data]))
-    es.addEventListener('status', (e) => {
-      try {
-        const p = JSON.parse(e.data) as { type: string; jid?: string; pid?: number; msg?: string }
-        if (p.type === 'connected') {
-          es.close()
-          setStartLogs((prev) => [...prev, t('bot.connected', { jid: p.jid ?? '' })])
-          setStartPhase('done')
-          load()
-        } else if (p.type === 'error') {
-          es.close()
-          setStartLogs((prev) => [...prev, t('bot.errorMsg', { msg: p.msg ?? '' })])
-          setStartPhase('error')
-        } else if (p.type === 'timeout') {
-          es.close()
-          setStartLogs((prev) => [...prev, t('startBot.logStreamEnded')])
-          setStartPhase('done')
-          load()
-        }
-      } catch { /* ignore */ }
-    })
-    es.onerror = () => {
-      es.close()
-      setStartLogs((p) => [...p, t('startBot.streamDisconnected')])
-      setStartPhase('done')
+      msgApi.error(msg)
+    } finally {
+      setRowBusy(phone, false)
     }
   }
 
@@ -393,11 +360,6 @@ const AccountsSection: React.FC = () => {
     } finally {
       setRowBusy(phone, false)
     }
-  }
-
-  const closeStartModal = () => {
-    esRef.current?.close()
-    setStartModalOpen(false)
   }
 
   // ── Delete ──
@@ -522,7 +484,7 @@ const AccountsSection: React.FC = () => {
       title: t('common.actions'),
       key: 'actions',
       fixed: 'right' as const,
-      width: 260,
+      width: 200,
       render: (_: unknown, record: BotAccount) => (
         <Space size={4}>
           {record.is_running ? (
@@ -534,8 +496,9 @@ const AccountsSection: React.FC = () => {
                 loading={rowLoading[record.phone]}
                 onClick={() => handleQuickStop(record.phone)}
               >
-                {t('startBot.stop')}
+                {t('bot.stop')}
               </Button>
+
             </Tooltip>
           ) : (
             <Tooltip title={t('bot.quickStart')}>
@@ -551,16 +514,6 @@ const AccountsSection: React.FC = () => {
               </Button>
             </Tooltip>
           )}
-          <Tooltip title={record.is_failed ? t('bot.unmarkFailed') : t('bot.markFailed')}>
-            <Button
-              size="small"
-              icon={record.is_failed ? <CheckCircleOutlined /> : <WarningOutlined />}
-              loading={rowLoading[record.phone]}
-              onClick={() => handleToggleFailed(record.phone)}
-            >
-              {record.is_failed ? t('bot.unmarkFailed') : t('bot.markFailed')}
-            </Button>
-          </Tooltip>
           <Tooltip title={t('bot.exportSegment')}>
             <Button
               size="small"
@@ -740,40 +693,6 @@ const AccountsSection: React.FC = () => {
         )}
       </Modal>
 
-      {/* ── One-click start log modal ── */}
-      <Modal
-        title={t('bot.startBotTitle', { phone: startPhone })}
-        open={startModalOpen}
-        onCancel={closeStartModal}
-        footer={
-          <Button onClick={closeStartModal}>
-            {startPhase === 'done' || startPhase === 'error' ? t('common.close') : t('common.cancel')}
-          </Button>
-        }
-        width={560}
-      >
-        <div
-          style={{
-            background: '#111',
-            color: '#d4d4d4',
-            padding: '10px 14px',
-            borderRadius: 8,
-            fontFamily: 'monospace',
-            fontSize: 12,
-            lineHeight: 1.6,
-            minHeight: 80,
-            maxHeight: 300,
-            overflowY: 'auto',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
-        >
-          {startLogs.length === 0 && startPhase === 'starting' && <Spin size="small" />}
-          {startLogs.map((line, i) => <div key={i}>{line}</div>)}
-          {startPhase === 'streaming' && <Spin size="small" tip={t('startBot.connecting')} style={{ marginTop: 4 }} />}
-          <div ref={logsBottomRef} />
-        </div>
-      </Modal>
     </Card>
   )
 }
