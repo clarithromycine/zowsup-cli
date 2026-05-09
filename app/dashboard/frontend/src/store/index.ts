@@ -74,6 +74,10 @@ interface DashboardState {
 
   // Triggers GroupInfo re-fetch when a group message arrives
   groupInfoRevision: number
+
+  // Translation: per-jid enabled flag + target language
+  translationEnabled: Record<string, boolean>
+  translationTargetLang: string
 }
 
 export interface BotLogEntry {
@@ -96,6 +100,7 @@ interface DashboardActions {
 
   setMessages: (messages: ChatMessage[], page: number, total: number) => void
   prependMessage: (msg: ChatMessage) => void
+  updateMessageTranslation: (id: number, translated_content: string) => void
   setMessagesLoading: (v: boolean) => void
 
   setProfile: (profile: UserProfile | null) => void
@@ -118,6 +123,11 @@ interface DashboardActions {
   appendBotLog: (entry: BotLogEntry) => void
   appendBotLogs: (entries: BotLogEntry[]) => void
   clearBotLogs: () => void
+
+  // Translation actions
+  toggleTranslation: (jid: string) => void
+  setTranslationEnabled: (jid: string, enabled: boolean) => void
+  setTranslationTargetLang: (lang: string) => void
 }
 
 type StoreState = DashboardState & DashboardActions
@@ -129,6 +139,9 @@ const DEFAULT_GLOBAL_STRATEGY: StrategyConfig = {
   tone: 'friendly',
   language: 'auto',
 }
+
+// Remove legacy localStorage translation cache (translations now stored in DB)
+localStorage.removeItem('msg_translations')
 
 export const useDashboardStore = create<StoreState>()(
   immer((set) => ({
@@ -166,6 +179,9 @@ export const useDashboardStore = create<StoreState>()(
     selectedLogBotId: null,
 
     groupInfoRevision: 0,
+
+    translationEnabled: JSON.parse(localStorage.getItem('translation_enabled') ?? '{}') as Record<string, boolean>,
+    translationTargetLang: localStorage.getItem('translation_target_lang') ?? 'zh',
 
     // ---- Actions ----
     setApiToken: (token) =>
@@ -267,6 +283,14 @@ export const useDashboardStore = create<StoreState>()(
         s.messagesLoading = v
       }),
 
+    updateMessageTranslation: (id, translated_content) =>
+      set((s) => {
+        const idx = s.messages.findIndex((m: ChatMessage) => m.id === id)
+        if (idx !== -1) {
+          s.messages[idx].translated_content = translated_content
+        }
+      }),
+
     setProfile: (profile) =>
       set((s) => {
         s.profile = profile
@@ -340,6 +364,24 @@ export const useDashboardStore = create<StoreState>()(
     clearBotLogs: () =>
       set((s) => {
         s.botLogs = []
+      }),
+
+    toggleTranslation: (jid) =>
+      set((s) => {
+        s.translationEnabled[jid] = !s.translationEnabled[jid]
+        localStorage.setItem('translation_enabled', JSON.stringify(s.translationEnabled))
+      }),
+
+    setTranslationEnabled: (jid, enabled) =>
+      set((s) => {
+        s.translationEnabled[jid] = enabled
+        localStorage.setItem('translation_enabled', JSON.stringify(s.translationEnabled))
+      }),
+
+    setTranslationTargetLang: (lang) =>
+      set((s) => {
+        s.translationTargetLang = lang
+        localStorage.setItem('translation_target_lang', lang)
       }),
   })),
 )

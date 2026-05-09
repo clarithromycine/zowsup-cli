@@ -16,6 +16,8 @@ export interface ChatMessage {
   resolved_jid?: string | null
   notify?: string | null
   media_path?: string | null
+  /** Auto-translated content, set client-side when translation toggle is on. */
+  translated_content?: string | null
 }
 
 export interface AIThought {

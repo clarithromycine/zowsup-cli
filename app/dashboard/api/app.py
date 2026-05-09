@@ -92,6 +92,14 @@ def create_app(db_path: str | None = None) -> Flask:
     from app.dashboard.api.bot_control import bot_bp
     app.register_blueprint(bot_bp, url_prefix="/api/bot")
 
+    # Materials (AI素材库)
+    from app.dashboard.api.materials import materials_bp
+    app.register_blueprint(materials_bp, url_prefix="/api/materials")
+
+    # Translation (智能翻译)
+    from app.dashboard.api.translation import translation_bp
+    app.register_blueprint(translation_bp, url_prefix="/api/translation")
+
     # ------------------------------------------------------------------
     # Phase 7: Swagger UI docs endpoint
     # ------------------------------------------------------------------

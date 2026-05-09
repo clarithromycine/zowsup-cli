@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { List, Input, Badge, Avatar, Typography, Spin, Empty, Tag, Tooltip } from 'antd'
-import { UserOutlined, TeamOutlined, SearchOutlined, RobotOutlined } from '@ant-design/icons'
+import { List, Input, Badge, Avatar, Typography, Spin, Empty, Tag, Tooltip, Switch, Space } from 'antd'
+import { UserOutlined, TeamOutlined, SearchOutlined, RobotOutlined, TranslationOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { fetchChatHistory, fetchContacts, fetchContactAvatar, refreshContactAvatar } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
@@ -52,6 +52,8 @@ const ContactList: React.FC = () => {
   const setMessages = useDashboardStore((s) => s.setMessages)
   const setMessagesLoading = useDashboardStore((s) => s.setMessagesLoading)
   const clearUnread = useDashboardStore((s) => s.clearUnread)
+  const translationEnabled = useDashboardStore((s) => s.translationEnabled)
+  const toggleTranslation = useDashboardStore((s) => s.toggleTranslation)
 
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
@@ -184,23 +186,53 @@ const ContactList: React.FC = () => {
                     <Text type="secondary" ellipsis style={{ fontSize: 12 }}>
                       {contact.last_message ?? '—'}
                     </Text>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4 }}>
-                      {contact.bot_jid && (
-                        <Tooltip title={contact.bot_jid}>
-                          <Tag
-                            icon={<RobotOutlined />}
-                            color="blue"
-                            style={{ fontSize: 10, margin: 0, padding: '0 4px', lineHeight: '16px' }}
-                          >
-                            {contact.bot_jid.replace(/@.*/, '')}
-                          </Tag>
-                        </Tooltip>
-                      )}
-                      {contact.last_timestamp && (
-                        <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
-                          {dayjs.unix(contact.last_timestamp).format('HH:mm')}
-                        </Text>
-                      )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      {/* Translation toggle — bottom-left */}
+                      <Tooltip
+                        title={
+                          translationEnabled[contact.jid]
+                            ? t('translate.disableFor')
+                            : t('translate.enableFor')
+                        }
+                      >
+                        <Space
+                          size={3}
+                          style={{ cursor: 'default' }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <TranslationOutlined
+                            style={{
+                              fontSize: 11,
+                              color: translationEnabled[contact.jid] ? '#1890ff' : '#d9d9d9',
+                            }}
+                          />
+                          <Switch
+                            size="small"
+                            checked={!!translationEnabled[contact.jid]}
+                            onChange={() => toggleTranslation(contact.jid)}
+                          />
+                        </Space>
+                      </Tooltip>
+
+                      {/* Bot tag + timestamp — bottom-right */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {contact.bot_jid && (
+                          <Tooltip title={contact.bot_jid}>
+                            <Tag
+                              icon={<RobotOutlined />}
+                              color="blue"
+                              style={{ fontSize: 10, margin: 0, padding: '0 4px', lineHeight: '16px' }}
+                            >
+                              {contact.bot_jid.replace(/@.*/, '')}
+                            </Tag>
+                          </Tooltip>
+                        )}
+                        {contact.last_timestamp && (
+                          <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>
+                            {dayjs.unix(contact.last_timestamp).format('HH:mm')}
+                          </Text>
+                        )}
+                      </div>
                     </div>
                   </div>
                 }

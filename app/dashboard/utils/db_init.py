@@ -134,6 +134,34 @@ CREATE TABLE IF NOT EXISTS group_members (
 );
 """
 
+_DDL_MATERIALS = """
+CREATE TABLE IF NOT EXISTS materials (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    type        TEXT    NOT NULL CHECK(type IN ('image', 'text', 'document', 'video', 'audio')),
+    content     TEXT,                              -- text content or base64/URL for AI-generated images
+    file_path   TEXT,                             -- relative path under data/materials/
+    mime_type   TEXT,
+    tags        TEXT,                             -- JSON array of tag strings
+    ai_prompt   TEXT,                             -- prompt used to generate (if AI-generated)
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+_DDL_MESSAGE_TEMPLATES = """
+CREATE TABLE IF NOT EXISTS message_templates (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT    NOT NULL,
+    type         TEXT    NOT NULL CHECK(type IN ('text', 'image', 'document', 'location', 'buttons', 'list')),
+    content_json TEXT    NOT NULL,                -- JSON describing the WhatsApp message structure
+    description  TEXT,
+    tags         TEXT,                           -- JSON array
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 # ---------------------------------------------------------------------------
 # Indexes DDL
 # ---------------------------------------------------------------------------
@@ -165,6 +193,8 @@ _ALL_DDL = [
     _DDL_STRATEGY_CONFLICTS,
     _DDL_DAILY_STATISTICS,
     _DDL_GROUP_MEMBERS,
+    _DDL_MATERIALS,
+    _DDL_MESSAGE_TEMPLATES,
 ] + _INDEXES
 
 
@@ -250,6 +280,14 @@ def _migrate_group_members_participant_lid(conn) -> None:
     )
 
 
+def _migrate_translated_content(conn) -> None:
+    """Add translated_content column to chat_messages if missing (idempotent)."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(chat_messages)").fetchall()}
+    if "translated_content" not in existing:
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN translated_content TEXT")
+        logger.info("Migrated chat_messages: added translated_content column")
+
+
 def init_db(db_path: str = DB_PATH) -> None:
     """
     Create tables, indexes, and enable WAL mode.
@@ -277,6 +315,7 @@ def init_db(db_path: str = DB_PATH) -> None:
         _migrate_group_members_index(conn)
         _migrate_group_members_last_seen(conn)
         _migrate_group_members_participant_lid(conn)
+        _migrate_translated_content(conn)
         conn.commit()
         logger.info(f"Dashboard DB initialised at {db_path} (WAL mode)")
     except Exception:

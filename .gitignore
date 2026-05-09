@@ -26,3 +26,4 @@ data/bot*.json
 data/bot*.pid
 data/bot.pid
 data/avatar*.json
+data/translation_config.json

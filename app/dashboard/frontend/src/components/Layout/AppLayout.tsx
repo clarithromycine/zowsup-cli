@@ -8,6 +8,8 @@ import {
   DisconnectOutlined,
   RobotOutlined,
   FileTextOutlined,
+  PictureOutlined,
+  TranslationOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -57,6 +59,16 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       key: '/login',
       icon: <RobotOutlined />,
       label: t('nav.botManagement'),
+    },
+    {
+      key: '/materials',
+      icon: <PictureOutlined />,
+      label: t('nav.materials'),
+    },
+    {
+      key: '/translate',
+      icon: <TranslationOutlined />,
+      label: t('nav.translate'),
     },
   ]
 

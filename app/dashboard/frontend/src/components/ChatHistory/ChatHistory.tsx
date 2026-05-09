@@ -181,11 +181,25 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
         <div>
         {msg.media_path
           ? <MediaContent msg={msg} />
-          : (
-            <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {msg.content}
-            </Text>
-          )
+          : msg.translated_content
+            ? (
+              <>
+                <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {msg.translated_content}
+                </Text>
+                <Text
+                  type="secondary"
+                  style={{ fontSize: 11, marginTop: 4, display: 'block', whiteSpace: 'pre-wrap', wordBreak: 'break-word', borderTop: '1px dashed #f0f0f0', paddingTop: 3 }}
+                >
+                  {'原文：'}{msg.content}
+                </Text>
+              </>
+            )
+            : (
+              <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {msg.content}
+              </Text>
+            )
         }
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginTop: 4 }}>

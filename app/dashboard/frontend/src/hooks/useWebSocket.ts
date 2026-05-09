@@ -17,6 +17,7 @@ export function useWebSocket(): void {
   const selectedLogBotId = useDashboardStore((s) => s.selectedLogBotId)
   const setWsConnected = useDashboardStore((s) => s.setWsConnected)
   const prependMessage = useDashboardStore((s) => s.prependMessage)
+  const updateMessageTranslation = useDashboardStore((s) => s.updateMessageTranslation)
   const setProfile = useDashboardStore((s) => s.setProfile)
   const setCurrentStrategy = useDashboardStore((s) => s.setCurrentStrategy)
   const setGlobalStrategy = useDashboardStore((s) => s.setGlobalStrategy)
@@ -66,10 +67,49 @@ export function useWebSocket(): void {
     })
 
     socket.on('new_message', (payload: WsNewMessagePayload) => {
-      const { selectedJid: currentJid } = useDashboardStore.getState()
-      prependMessage(payload.message)
+      const { selectedJid: currentJid, translationEnabled, translationTargetLang, apiToken } = useDashboardStore.getState()
+      const msg = payload.message
+      prependMessage(msg)
       if (payload.jid !== currentJid) {
         incrementUnread(payload.jid)
+      }
+
+      // Auto-translate incoming text messages when the toggle is on for this JID
+      if (
+        msg.direction === 'in' &&
+        !msg.media_path &&
+        msg.content?.trim() &&
+        translationEnabled[payload.jid]
+      ) {
+        fetch('/api/translation/translate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+          },
+          body: JSON.stringify({
+            text: msg.content,
+            from_lang: 'auto',
+            to_lang: translationTargetLang || 'zh',
+          }),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (data?.translated && data.translated !== msg.content) {
+              updateMessageTranslation(msg.id, data.translated)
+              // Persist translation to DB for audit and cross-device consistency
+              const { apiToken: tok } = useDashboardStore.getState()
+              fetch(`/api/translation/message/${msg.id}`, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(tok ? { Authorization: `Bearer ${tok}` } : {}),
+                },
+                body: JSON.stringify({ translated_content: data.translated }),
+              }).catch(() => { /* non-fatal */ })
+            }
+          })
+          .catch(() => { /* silent — original content remains visible */ })
       }
     })
 

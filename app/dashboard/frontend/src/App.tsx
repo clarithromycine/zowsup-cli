@@ -7,6 +7,8 @@ import DashboardPage from './pages/DashboardPage'
 import StrategyPage from './pages/StrategyPage'
 import BotLoginPage from './pages/BotLoginPage'
 import BotLogsPage from './pages/BotLogsPage'
+import MaterialsPage from './pages/MaterialsPage'
+import TranslatePage from './pages/TranslatePage'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useSSE } from './hooks/useSSE'
 import { setApiToken, getApiToken } from './api/client'
@@ -27,6 +29,8 @@ function AppInner() {
           <Route path="/logs" element={<BotLogsPage />} />
           <Route path="/strategy" element={<StrategyPage />} />
           <Route path="/login" element={<BotLoginPage />} />
+          <Route path="/materials" element={<MaterialsPage />} />
+          <Route path="/translate" element={<TranslatePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppLayout>

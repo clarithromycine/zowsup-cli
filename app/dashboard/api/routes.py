@@ -367,6 +367,7 @@ def chat_history():
         rows = conn.execute(
             "SELECT cm.id, cm.user_jid, cm.bot_jid, cm.direction, cm.content, cm.message_type, "
             "       cm.timestamp, cm.created_at, cm.participant, cm.notify, cm.media_path, at.urgency_level, "
+            "       cm.translated_content, "
             "       gm.participant_jid AS resolved_jid "
             "FROM chat_messages cm "
             "LEFT JOIN ai_thoughts at ON at.message_id = cm.id "
