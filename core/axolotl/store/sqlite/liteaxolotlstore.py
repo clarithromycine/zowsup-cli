@@ -127,11 +127,12 @@ class LiteAxolotlStore(AxolotlStore):
         return self.contactStore.getAllContact()
     
     def findContact(self,jid) -> Any:
+        
 
         if jid.endswith("lid"):
-            return self.contactStore.findContact(lid = jid)
+            return self.contactStore.findContact(jid=None,lid = jid)
         else:
-            return self.contactStore.findContact(jid = jid)
+            return self.contactStore.findContact(jid = jid,lid=None)
 
     
     def addBroadcast(self,jids,senderJid,name=None) -> Any:

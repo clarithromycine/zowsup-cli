@@ -1301,6 +1301,11 @@ class ZowBotLayer(YowInterfaceLayer):
         if _from.endswith("lid"):
             lid = Utils.normalize_jid(_from)
             jid = messageProtocolEntity.getSenderPn()
+            # sender_pn is sometimes absent; fall back to notify if it looks like a JID
+            if not jid:
+                notify = messageProtocolEntity.getNotify()
+                if notify and notify.endswith("s.whatsapp.net"):
+                    jid = notify
         else:
             jid = Utils.normalize_jid(_from)
             lid = messageProtocolEntity.getSenderLid()
@@ -1386,7 +1391,10 @@ class ZowBotLayer(YowInterfaceLayer):
         jid, lid = self._parse_jid_and_lid(messageProtocolEntity)
    
         if self.db:
-            self.db._store.updateContact(jid=jid,lid=lid,name=messageProtocolEntity.getNotify())
+            notify = messageProtocolEntity.getNotify()
+            # Don't store a JID-formatted string as a display name
+            contact_name = None if (notify and '@' in notify) else notify
+            self.db._store.updateContact(jid=jid, lid=lid, name=contact_name)
 
         # Parse message type and extract text
         type, text = self._parse_message_type(messageProtocolEntity)
@@ -1588,6 +1596,8 @@ class ZowBotLayer(YowInterfaceLayer):
                     if len(jid)>0:
                         cmdParams[0]=','.join(jid)
                         await redo_func(cmdParams,options)                
+                    else:
+                        logger.error("target not found in contacts")
                 else:
                     logger.error("ERROR on _sendIq")   
 

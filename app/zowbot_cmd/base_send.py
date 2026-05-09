@@ -36,13 +36,15 @@ class BotSendCommand(BotCommand):
                             jid.append(value["jid"])
                         else:
                             logger.info("%s not found",key)
-                    if len(jid)>0:
-                        params[0]=','.join(jid)
-                        await redo_func(params,options)      
-                    else:
-                        logger.error("target not found in contacts")   
                 except Exception as e:
                     logger.error(f"Error syncing contacts: {e}")
+                    return
+
+                if len(jid)>0:
+                    params[0]=','.join(jid)
+                    await redo_func(params,options)      
+                else:
+                    logger.error("target not found in contacts")
 
             else:
                 logger.info("target in contacts")                       

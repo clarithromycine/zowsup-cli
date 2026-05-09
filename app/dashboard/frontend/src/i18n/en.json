@@ -66,6 +66,7 @@
     "loading": "Loading...",
     "empty": "No messages",
     "user": "User",
+    "originalText": "Original: ",
     "urgency": {
       "high": "Urgent",
       "medium": "Soon",
@@ -354,7 +355,7 @@
     "provider": "Translation Provider",
     "providerAuto": "Auto (try in priority order)",
     "targetLang": "Default Target Language",
-    "globalHint": "Auto mode tries providers in order: Google → LibreTranslate → DeepL → OpenAI, using the first available service.",
+    "globalHint": "Auto mode tries providers in order: Google → LibreTranslate → DeepL → OpenAI → ..., using the first available service.",
     "freeAndOpen": "Free & Open Source",
     "freeNoKey": "Free, no API Key required",
     "googleDesc": "Google Translate — free, no API key needed. Used first in auto mode; supports virtually all language pairs.",

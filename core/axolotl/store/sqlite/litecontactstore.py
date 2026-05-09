@@ -24,20 +24,30 @@ class LiteContactStore(TaskMsgStore):
     def updateContact(self, jid,lid, name=None):
 
         #检查jid和lid都要满足特定的条件，否则不加到联系人库里面
+
         if jid is not None and not jid.endswith("s.whatsapp.net"):
             return None
         
         if lid is not None and not lid.endswith("lid"):
             return None
+                
                                             
-        if not self.findContact(jid,lid):            
+        if not self.findContact(jid,lid):
             q = "INSERT INTO contact(name,jid,lid,timestamp) VALUES(?,?,?,?)"
-            self.dbConn.cursor().execute(q, (name, jid,lid,int(time.time())))
+            self.dbConn.cursor().execute(q, (name, jid, lid, int(time.time())))
             self.dbConn.commit()
-            return jid     
+            return jid
         else:
+            # If both jid and lid are now known, fill in whichever was previously NULL
+            if jid is not None and lid is not None:
+                c = self.dbConn.cursor()
+                c.execute(
+                    "UPDATE contact SET jid=COALESCE(jid,?), lid=COALESCE(lid,?) WHERE jid=? OR lid=?",
+                    (jid, lid, jid, lid)
+                )
+                self.dbConn.commit()
             if name is not None:
-                self.updateName(jid,lid,name)
+                self.updateName(jid, lid, name)
 
         return None
 
@@ -59,7 +69,9 @@ class LiteContactStore(TaskMsgStore):
         else:
             c.execute("SELECT 1 FROM contact WHERE jid = ? LIMIT 1", (jid,))
 
-        return c.fetchone() is not None
+        ret = c.fetchone() is not None
+
+        return ret
                                                     
     def removeContact(self, jid=None, lid=None):
         if jid is None and lid is None:
@@ -100,17 +112,19 @@ class LiteContactStore(TaskMsgStore):
     def updateName(self, jid=None, lid=None, name=None):
         if name is None:
             return False
+        
+        logger.debug("updateName jid=%s lid=%s name=%s", jid, lid, name)
 
         if not self.findContact(jid, lid):
             self.updateContact(jid, lid, name=name)
             return True
-
+                
         c = self.dbConn.cursor()
         if lid is not None and jid is not None:
             c.execute("UPDATE contact SET name=? WHERE jid=? OR lid=?", (name, jid, lid))
-        elif lid is not None:
+        elif lid is not None:            
             c.execute("UPDATE contact SET name=? WHERE lid=?", (name, lid))
-        else:
+        else:            
             c.execute("UPDATE contact SET name=? WHERE jid=?", (name, jid))
 
         self.dbConn.commit()
@@ -174,3 +188,4 @@ class LiteContactStore(TaskMsgStore):
 
         self.dbConn.commit()
         return True   
+    

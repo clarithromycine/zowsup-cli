@@ -116,6 +116,7 @@ function SourceTag({ direction }: { direction: 'in' | 'out' }) {
 }
 
 function MessageItem({ msg }: { msg: ChatMessage }) {
+  const { t } = useTranslation()
   // Prefer resolved_jid (real JID resolved from LID) over raw participant
   const participantLabel = (msg.resolved_jid || msg.participant)
     ? (msg.resolved_jid || msg.participant)!.replace(/@.*$/, '')
@@ -191,7 +192,7 @@ function MessageItem({ msg }: { msg: ChatMessage }) {
                   type="secondary"
                   style={{ fontSize: 11, marginTop: 4, display: 'block', whiteSpace: 'pre-wrap', wordBreak: 'break-word', borderTop: '1px dashed #f0f0f0', paddingTop: 3 }}
                 >
-                  {'原文：'}{msg.content}
+                  {t('chatHistory.originalText')}{msg.content}
                 </Text>
               </>
             )
