@@ -51,7 +51,7 @@
   "dashboard": {
     "contacts": "会话列表",
     "chatHistory": "聊天记录",
-    "userProfile": "用户画像",
+    "userProfile": "用户信息",
     "groupInfo": "群组信息",
     "statistics": "统计数据"
   },
@@ -270,7 +270,10 @@
     "inactive": "已屏蔽",
     "noteLabel": "备注（记录原因）",
     "applyNow": "立即应用",
-    "applyStrategyFor": "调整策略 — {{jid}}"
+    "applyStrategyFor": "调整策略 — {{jid}}",
+    "infoTitle": "用户信息",
+    "phone": "手机号",
+    "pushName": "推送名称"
   },
   "langSwitcher": {
     "en": "EN",

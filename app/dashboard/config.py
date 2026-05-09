@@ -31,8 +31,14 @@ def _load_config() -> dict:
         "PROJECT_ROOT": str(project_root),
         "ACCOUNT_PATH": account_path,
         # dashboard.db lives inside the project's data/ folder, completely
-        # separate from any per-account db.db
-        "DASHBOARD_DB_PATH": os.environ.get("DASHBOARD_DB_PATH", default_db),
+        # separate from any per-account db.db.
+        # Only provide the default path when explicitly in dashboard mode;
+        # bot-only processes (script/main.py) should leave this as None so they
+        # skip dashboard writes gracefully.
+        "DASHBOARD_DB_PATH": (
+            os.environ.get("DASHBOARD_DB_PATH")
+            or (default_db if os.environ.get("DASHBOARD_MODE") else None)
+        ),
         "FLASK_HOST": os.environ.get("DASHBOARD_HOST", "0.0.0.0"),
         "FLASK_PORT": int(os.environ.get("DASHBOARD_PORT", "5000")),
         "FLASK_DEBUG": os.environ.get("DASHBOARD_DEBUG", "false").lower() == "true",

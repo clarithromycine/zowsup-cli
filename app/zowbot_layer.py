@@ -1194,16 +1194,12 @@ class ZowBotLayer(YowInterfaceLayer):
         """
         Send message acknowledgments with probabilistic behavior.
         
-        - Sends first ack (received notification) with 80% probability
-        - If first ack sent, waits 1-5 seconds randomly
+        - Sends first ack (received notification) with 80% probability        
         - Then sends second ack (read notification)
         """
 
         if random.random() < 0.8:
-            await self.toLower(messageProtocolEntity.ack())
-            # Wait 1-5 seconds randomly before sending read ack
-            wait_time = random.uniform(1, 5)
-            await asyncio.sleep(wait_time)
+            await self.toLower(messageProtocolEntity.ack())            
         else:
             logger.debug("Not sending received ack for message %s" % messageProtocolEntity.getId())
         
@@ -1460,7 +1456,7 @@ class ZowBotLayer(YowInterfaceLayer):
 
         # Persist to dashboard.db for every text/media message, independent of AI
         # (runs after satisfaction intercept so survey replies are excluded)
-        if text and self._dashboard_db_path:
+        if text and self._dashboard_db_path:            
             direction = "out" if messageProtocolEntity.fromme else "in"
             participant = messageProtocolEntity.getParticipant() or None
             notify = messageProtocolEntity.getNotify() or None

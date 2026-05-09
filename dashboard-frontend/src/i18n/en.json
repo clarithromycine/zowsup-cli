@@ -51,7 +51,7 @@
   "dashboard": {
     "contacts": "Sessions",
     "chatHistory": "Chat History",
-    "userProfile": "User Profile",
+    "userProfile": "User Info",
     "groupInfo": "Group Info",
     "statistics": "Statistics"
   },
@@ -269,7 +269,10 @@
     "inactive": "Inactive",
     "noteLabel": "Note (reason for change)",
     "applyNow": "Apply Now",
-    "applyStrategyFor": "Adjust Strategy — {{jid}}"
+    "applyStrategyFor": "Adjust Strategy — {{jid}}",
+    "infoTitle": "User Info",
+    "phone": "Phone",
+    "pushName": "Push Name"
   },
   "langSwitcher": {
     "en": "EN",

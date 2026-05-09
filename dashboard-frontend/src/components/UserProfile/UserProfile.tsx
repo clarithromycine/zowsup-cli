@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import {
+  Avatar,
   Card,
   Descriptions,
   Tag,
@@ -175,6 +176,8 @@ const UserProfile: React.FC = () => {
   const profileLoading = useDashboardStore((s) => s.profileLoading)
   const setProfile = useDashboardStore((s) => s.setProfile)
   const setProfileLoading = useDashboardStore((s) => s.setProfileLoading)
+  const contacts = useDashboardStore((s) => s.contacts)
+  const contact = contacts.find((c) => c.jid === selectedJid)
 
   // Translated option arrays (react to lang change)
   const CATEGORY_OPTIONS = [
@@ -381,9 +384,32 @@ const UserProfile: React.FC = () => {
 
   return (
     <div style={{ padding: 12 }}>
-      <Title level={5} style={{ marginBottom: 12 }}>
+      {/* 用户信息 */}
+      <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>
+        {t('userProfile.infoTitle')}
+      </Text>
+      <div style={{ background: '#fafafa', borderRadius: 8, padding: '8px 12px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+          <Avatar
+            size={48}
+            src={contact?.avatar_url ?? undefined}
+            style={{ flexShrink: 0, backgroundColor: '#722ed1' }}
+          >
+            {!contact?.avatar_url ? selectedJid.replace(/@.*$/, '').slice(0, 2) : null}
+          </Avatar>
+          <div>
+            {contact?.push_name && (
+              <Text strong style={{ fontSize: 13, display: 'block' }}>{contact.push_name}</Text>
+            )}
+            <Text code style={{ fontSize: 12 }}>{selectedJid.replace(/@.*$/, '')}</Text>
+          </div>
+        </div>
+      </div>
+
+      {/* 用户画像 */}
+      <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>
         {t('userProfile.title')}
-      </Title>
+      </Text>
 
       <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
         <Col span={12}>

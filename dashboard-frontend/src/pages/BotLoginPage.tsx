@@ -597,26 +597,33 @@ const AccountsSection: React.FC = () => {
         style={{ marginBottom: 12, maxWidth: 280 }}
       />
 
-      {/* Running bots summary banner */}
-      {accounts.some((a) => a.is_running) && (
-        <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f' }}>
-          <Space wrap>
-            <Text style={{ color: '#52c41a' }}>
-              <RobotOutlined /> 运行中 ({accounts.filter((a) => a.is_running).length}):
-            </Text>
-            {accounts.filter((a) => a.is_running).map((b) => (
-              <Tag
-                key={b.phone}
-                color="green"
-                closable
-                onClose={(e) => { e.preventDefault(); handleQuickStop(b.phone) }}
-              >
-                {b.phone}
-              </Tag>
-            ))}
-          </Space>
-        </div>
-      )}
+      {/* Account status summary */}
+      {accounts.length > 0 && (() => {
+        const runningCount = accounts.filter((a) => a.is_running).length
+        const failedCount2 = accounts.filter((a) => a.is_failed).length
+        const offlineCount = accounts.length - runningCount - failedCount2
+        return (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 20 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#52c41a', display: 'inline-block' }} />
+              <Text style={{ fontSize: 13, color: '#389e0d' }}>{t('bot.running')}</Text>
+              <Text strong style={{ fontSize: 13, color: '#389e0d' }}>{runningCount}</Text>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: '#fafafa', border: '1px solid #d9d9d9', borderRadius: 20 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#d9d9d9', display: 'inline-block' }} />
+              <Text style={{ fontSize: 13, color: '#595959' }}>{t('bot.offline')}</Text>
+              <Text strong style={{ fontSize: 13, color: '#595959' }}>{offlineCount}</Text>
+            </div>
+            {failedCount2 > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 20 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff4d4f', display: 'inline-block' }} />
+                <Text style={{ fontSize: 13, color: '#cf1322' }}>{t('bot.loginFailed')}</Text>
+                <Text strong style={{ fontSize: 13, color: '#cf1322' }}>{failedCount2}</Text>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       <Table
         dataSource={filteredAccounts}

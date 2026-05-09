@@ -65,6 +65,13 @@ except Exception:
     pass  # logging to file is best-effort; never crash at startup
 
 # ---------------------------------------------------------------------------
+# Mark this process as running in dashboard mode so config.py can gate
+# DASHBOARD_DB_PATH (and other dashboard-only defaults) on this flag.
+# Must be set before importing config.
+# ---------------------------------------------------------------------------
+os.environ.setdefault("DASHBOARD_MODE", "1")
+
+# ---------------------------------------------------------------------------
 # Import app factory (deferred so logging is set up first)
 # ---------------------------------------------------------------------------
 from app.dashboard.api.app import create_app
