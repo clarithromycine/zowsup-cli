@@ -204,7 +204,7 @@ async def _send_queue_poll_task(layer, poll_interval: int = 3):
     (``msg.send`` for text, ``msg.sendmedia`` for media).
     """
     try:
-        if not _db.db_path:
+        if not _db.db_path and not os.environ.get("AGENT_MODE"):
             logger.debug("Send queue poll task: no dashboard DB configured, exiting")
             return
 

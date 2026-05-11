@@ -252,6 +252,25 @@ def _all_statuses() -> list[dict]:
     return [_bot_status(p) for p in _phone_list()]
 
 
+def _enqueue_send_task(payload: dict) -> dict:
+    """Write a send task to the local send_queue.json for the bot to pick up."""
+    try:
+        from app.dashboard.utils.send_queue import enqueue_send_task
+        task_id = enqueue_send_task(
+            to_jid=payload.get("to_jid", ""),
+            message_type=payload.get("message_type", "text"),
+            content=payload.get("content", ""),
+            bot_jid=payload.get("bot_jid"),
+            media_url=payload.get("media_url"),
+            caption=payload.get("caption"),
+        )
+        logger.info("Send task enqueued locally: %s → %s", task_id, payload.get("to_jid"))
+        return {"ok": True, "task_id": task_id}
+    except Exception as exc:
+        logger.error("Failed to enqueue send task: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
 def _drain_proc_stdout(proc: subprocess.Popen) -> None:
     try:
         for _ in proc.stdout:  # type: ignore[union-attr]
@@ -402,6 +421,8 @@ def command(data):
                 result = {"bots": _all_statuses()}
         elif cmd_type == "list_phones":
             result = {"phones": _phone_list()}
+        elif cmd_type == "send_message":
+            result = _enqueue_send_task(payload)
         else:
             result = {"ok": False, "error": f"unknown command: {cmd_type}"}
     except Exception as exc:

@@ -14,6 +14,7 @@ Endpoints:
 
 import logging
 import os
+import uuid
 from flask import Blueprint, current_app, jsonify, request, send_file, abort
 
 from app.dashboard.utils.db_init import get_db_connection, verify_db
@@ -1036,6 +1037,38 @@ def send_message():
                 bot_jid = row[0]
         except Exception as exc:
             logger.warning("Could not auto-select bot_jid for %s: %s", to_jid, exc)
+
+    # If the target bot is managed by a connected agent, dispatch the task
+    # via WebSocket so it lands on the agent machine's local send_queue.json.
+    # (File-based IPC only works when bot and server share the same filesystem.)
+    phone = (bot_jid or "").split("@")[0]
+    if phone:
+        try:
+            from app.dashboard.api.agent_gateway import get_agent_for_phone, dispatch_command
+            agent_id = get_agent_for_phone(phone)
+            if agent_id:
+                task_id = str(uuid.uuid4())
+                result = dispatch_command(
+                    agent_id, "send_message",
+                    {
+                        "id": task_id,
+                        "to_jid": to_jid,
+                        "message_type": message_type,
+                        "content": content,
+                        "bot_jid": bot_jid,
+                        "media_url": media_url,
+                        "caption": caption,
+                    },
+                    timeout=5.0,
+                )
+                if result and result.get("ok"):
+                    return jsonify({"ok": True, "task_id": task_id}), 202
+                elif result:
+                    return jsonify({"error": result.get("error", "agent send failed")}), 502
+                else:
+                    return jsonify({"error": "agent not responding"}), 502
+        except Exception as exc:
+            logger.warning("Agent dispatch failed, falling back to local queue: %s", exc)
 
     try:
         from app.dashboard.utils.send_queue import enqueue_send_task
