@@ -454,28 +454,39 @@ def register_agent_namespace(sio) -> None:
         from flask import request as freq
 
         sid = freq.sid
+        aid: Optional[str] = None
+        phones_snapshot: list = []
+
+        # Only mutate the registry under the lock; never call sio.emit() here
+        # to avoid holding the lock during socket I/O (causes werkzeug
+        # "write() before start_response" when a WebSocket tears down).
         with _registry_lock:
             info = _agents_by_sid.pop(sid, None)
             if info:
                 aid = info["agent_id"]
+                phones_snapshot = list(info.get("phones", []))
                 _sid_by_agent.pop(aid, None)
-                for ph in info.get("phones", []):
+                for ph in phones_snapshot:
                     if _agent_by_phone.get(ph) == aid:
                         _agent_by_phone.pop(ph, None)
-                # Mark all phones this agent managed as not running
-                with _bot_status_lock:
-                    for ph, st in list(_agent_bot_status.items()):
-                        if st.get("agent_id") == aid:
-                            _agent_bot_status[ph] = {**st, "running": False}
-                            _bot_instance_upsert(ph, aid, running=False)
 
-                _agent_upsert(aid, "offline")
-                logger.info("Agent %s disconnected", aid)
-                sio.emit("agent_disconnected", {"agent_id": aid}, namespace="/")
-                _emit_alert("agent_offline", {
-                    "agent_id": aid,
-                    "phones": list(info.get("phones", [])),
-                })
+        if aid:
+            # Mark all phones this agent managed as not running
+            with _bot_status_lock:
+                for ph, st in list(_agent_bot_status.items()):
+                    if st.get("agent_id") == aid:
+                        _agent_bot_status[ph] = {**st, "running": False}
+                        _bot_instance_upsert(ph, aid, running=False)
+
+            _agent_upsert(aid, "offline")
+            logger.info("Agent %s disconnected", aid)
+            # Emit OUTSIDE any lock so socket I/O can't deadlock with
+            # the disconnect teardown path in werkzeug/flask-socketio.
+            sio.emit("agent_disconnected", {"agent_id": aid}, namespace="/")
+            _emit_alert("agent_offline", {
+                "agent_id": aid,
+                "phones": phones_snapshot,
+            })
 
     @sio.on("agent_ready", namespace="/agent")
     def on_agent_ready(data):
