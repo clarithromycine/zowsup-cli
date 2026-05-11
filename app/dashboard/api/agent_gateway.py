@@ -319,6 +319,14 @@ def register_agent_namespace(sio) -> None:
                         "jid": payload.get("jid"),
                         "agent_id": agent_id,
                     }
+                # Also register this phone in _agent_by_phone if not already there
+                # (handles phones started after agent connected that weren't in agent_ready)
+                with _registry_lock:
+                    if _agent_by_phone.get(phone) != agent_id:
+                        _agent_by_phone[phone] = agent_id
+                        if info:
+                            if phone not in info.get("phones", []):
+                                info.setdefault("phones", []).append(phone)
             sio.emit("bot_status_changed", {**payload, "agent_id": agent_id}, namespace="/")
         elif ev_type == "heartbeat":
             # Bulk status from heartbeat

@@ -75,6 +75,10 @@ interface DashboardState {
   // Triggers GroupInfo re-fetch when a group message arrives
   groupInfoRevision: number
 
+  // Incremented when bot status changes (e.g. agent bot starts/stops)
+  // so AppLayout can react immediately without waiting for the poll interval
+  botAccountsRevision: number
+
   // Translation: per-jid enabled flag + target language
   translationEnabled: Record<string, boolean>
   translationTargetLang: string
@@ -123,6 +127,8 @@ interface DashboardActions {
   appendBotLog: (entry: BotLogEntry) => void
   appendBotLogs: (entries: BotLogEntry[]) => void
   clearBotLogs: () => void
+
+  bumpBotAccountsRevision: () => void
 
   // Translation actions
   toggleTranslation: (jid: string) => void
@@ -179,6 +185,7 @@ export const useDashboardStore = create<StoreState>()(
     selectedLogBotId: null,
 
     groupInfoRevision: 0,
+    botAccountsRevision: 0,
 
     translationEnabled: JSON.parse(localStorage.getItem('translation_enabled') ?? '{}') as Record<string, boolean>,
     translationTargetLang: localStorage.getItem('translation_target_lang') ?? 'zh',
@@ -364,6 +371,11 @@ export const useDashboardStore = create<StoreState>()(
     clearBotLogs: () =>
       set((s) => {
         s.botLogs = []
+      }),
+
+    bumpBotAccountsRevision: () =>
+      set((s) => {
+        s.botAccountsRevision += 1
       }),
 
     toggleTranslation: (jid) =>

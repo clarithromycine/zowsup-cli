@@ -26,6 +26,7 @@ export function useWebSocket(): void {
   const appendBotLog = useDashboardStore((s) => s.appendBotLog)
   const appendBotLogs = useDashboardStore((s) => s.appendBotLogs)
   const setActiveBots = useDashboardStore((s) => s.setActiveBots)
+  const bumpBotAccountsRevision = useDashboardStore((s) => s.bumpBotAccountsRevision)
 
   // Helper: fetch bot list from API and update store
   const fetchBotList = async (token: string) => {
@@ -146,6 +147,13 @@ export function useWebSocket(): void {
 
     socket.on('bot_log_snapshot', (entries: BotLogEntry[]) => {
       appendBotLogs(entries)
+    })
+
+    // Refresh bot count immediately when an agent reports a status change
+    socket.on('bot_status_changed', () => {
+      const { apiToken } = useDashboardStore.getState()
+      fetchBotList(apiToken)
+      bumpBotAccountsRevision()
     })
 
     // Poll bot list every 10 s so the log filter dropdown stays current

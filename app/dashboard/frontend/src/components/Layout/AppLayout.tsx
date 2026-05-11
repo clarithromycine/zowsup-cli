@@ -31,9 +31,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const wsConnected = useDashboardStore((s) => s.wsConnected)
   const collapsed = useDashboardStore((s) => s.siderCollapsed)
   const setSiderCollapsed = useDashboardStore((s) => s.setSiderCollapsed)
+  const botAccountsRevision = useDashboardStore((s) => s.botAccountsRevision)
   const [runningCount, setRunningCount] = useState<number>(0)
 
-  // Poll running bot count every 10 s
+  // Poll running bot count every 10 s; also refresh immediately on bot_status_changed
   useEffect(() => {
     const load = () => {
       fetchBotAccounts()
@@ -43,7 +44,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     load()
     const timer = setInterval(load, 10_000)
     return () => clearInterval(timer)
-  }, [])
+  }, [botAccountsRevision])
 
   const menuItems = [
     {

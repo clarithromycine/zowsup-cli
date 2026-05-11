@@ -252,6 +252,19 @@ def _all_statuses() -> list[dict]:
     return [_bot_status(p) for p in _phone_list()]
 
 
+def _emit_bot_status(phone: str) -> None:
+    """Emit a bot_status event for *phone* to the backend (fire-and-forget)."""
+    try:
+        status = _bot_status(phone)
+        sio.emit(
+            "agent_event",
+            {"type": "bot_status", "payload": status},
+            namespace="/agent",
+        )
+    except Exception as exc:
+        logger.debug("_emit_bot_status failed: %s", exc)
+
+
 def _enqueue_send_task(payload: dict) -> dict:
     """Write a send task to the local send_queue.json for the bot to pick up."""
     try:
@@ -409,11 +422,15 @@ def command(data):
                 result = {"ok": False, "error": "phone required"}
             else:
                 result = _start_bot(phone)
+                # Emit updated status immediately so backend doesn't wait for heartbeat
+                _emit_bot_status(phone)
         elif cmd_type == "stop_bot":
             if not phone:
                 result = {"ok": False, "error": "phone required"}
             else:
                 result = _stop_bot(phone)
+                # Emit updated status immediately so backend doesn't wait for heartbeat
+                _emit_bot_status(phone)
         elif cmd_type == "get_status":
             if phone:
                 result = _bot_status(phone)
