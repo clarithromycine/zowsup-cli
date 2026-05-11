@@ -86,8 +86,21 @@ class YowNotificationsProtocolLayer(YowProtocolLayer):
             
         elif node["type"] == "privacy_token":        
             logger.info("receive a privacy_token from %s",node["from"].split("@")[0])         
-            db = self.getStack().getProp("profile").axolotl_manager  
-            db._store.updateTctoken(node)               
+            jid = lid = tctoken = tctoken_ts = None
+            tokens = node.getChild("tokens")
+            if tokens:
+                token = tokens.getAllChildren()[0]
+                if token["type"] == "trusted_contact":
+                    if node["from"].endswith("lid"):
+                        jid = node["sender_pn"]
+                        lid = node["from"]
+                    else:
+                        jid = node["from"]
+                        lid = node["sender_lid"]
+                    tctoken = token.getData()
+                    tctoken_ts = int(token.getAttributeValue("t"))
+            db = self.getStack().getProp("profile").axolotl_manager
+            db._store.updateTctoken(jid=jid, lid=lid, tctoken=tctoken, tctoken_ts=tctoken_ts)
                                 
         elif node["type"] == "psa":            
             logger.info("receive a psa node,ignoring it ")            

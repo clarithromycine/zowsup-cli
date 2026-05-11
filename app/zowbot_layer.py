@@ -73,6 +73,8 @@ from core.profile.profile import YowProfile
 from common.utils import Utils
 from conf.constants import SysVar
 from .zowbot_values import ZowBotStatus, ZowBotType
+from .ai_module.satisfaction import SatisfactionPlugin
+from app.dashboard.bridge import dashboard as _db
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +107,7 @@ async def _qr_code_task(layer, interval):
                 ))
                 qr.make()
                 qr.print_ascii(out=None, tty=False, invert=False)
+                sys.stdout.flush()
                 layer.setProp("refs", refs)
             else:
                 await layer.getStack().broadcastEvent(YowLayerEvent(YowNetworkLayer.EVENT_STATE_DISCONNECT))
@@ -113,6 +116,148 @@ async def _qr_code_task(layer, interval):
                 await asyncio.sleep(1)
     except asyncio.CancelledError:
         logger.debug("QR code task cancelled")
+
+
+async def _avatar_poll_task(layer, poll_interval: int = 15):
+    """
+    Background asyncio task that fulfils pending avatar fetch requests.
+
+    Every *poll_interval* seconds this task reads ``data/avatar_queue.json``,
+    calls ``contact.getavatar`` (or ``group.info`` for groups) for each queued
+    JID, persists the returned CDN URL via ``save_avatar_url``, and also
+    resolves + saves the display name (push name for individuals, subject for
+    groups) via ``save_display_name``.
+
+    The task is started once after the bot reaches the RUNNING state and
+    runs until the asyncio event loop is stopped.
+    """
+    try:
+        if not _db.db_path:
+            logger.warning("Avatar poll task: DASHBOARD_MODE not set or DASHBOARD_DB_PATH not configured, exiting")
+            return
+
+        logger.debug("Avatar poll task started (interval=%ds)", poll_interval)
+        while True:
+            await asyncio.sleep(poll_interval)
+            jids = _db.dequeue_avatar_requests()
+            for jid in jids:
+                # ── Avatar ──────────────────────────────────────────────────
+                try:
+                    result = await layer.executeCommand("contact.getavatar", [jid])
+                    url = (result or {}).get("url")
+                    if url:
+                        _db.save_avatar_url(jid, url)
+                        logger.debug("Avatar cached for %s", jid)
+                    else:
+                        logger.debug("No avatar URL returned for %s (result=%s)", jid, result)
+                except Exception as e:
+                    logger.debug("Avatar fetch failed for %s: %s", jid, e)
+
+                # ── Display name ────────────────────────────────────────────
+                try:
+                    if jid.endswith("@g.us"):
+                        # Group: get subject from group.info
+                        info = await layer.executeCommand("group.info", [jid])
+                        name = (info or {}).get("subject") or ""
+                        # Fix UTF-8 mojibake: protocol may deliver UTF-8 bytes
+                        # decoded as Latin-1, producing Ð© sequences.
+                        if name:
+                            try:
+                                name = name.encode("latin-1").decode("utf-8")
+                            except (UnicodeEncodeError, UnicodeDecodeError):
+                                pass  # already valid Unicode
+                        # ── Group members + roles ──────────────────────────
+                        try:
+                            participants = (info or {}).get("participants") or {}
+                            participant_lids = (info or {}).get("participant_lids") or {}
+                            if participants:
+                                _db.save_group_members(jid, participants, participant_lids)
+                                logger.debug("Group members cached for %s (%d members)", jid, len(participants))
+                        except Exception as me:
+                            logger.debug("Group member save failed for %s: %s", jid, me)
+                    else:
+                        # Individual: get push name from contact.getprofile
+                        profile_result = await layer.executeCommand(
+                            "contact.getprofile",
+                            [jid],
+                            {"catalogs": "name"},
+                        )
+                        profiles = (profile_result or {}).get("profiles", {})
+                        entry = profiles.get(jid, {})
+                        name = entry.get("name") or entry.get("pushName") or ""
+                    if name:
+                        _db.save_display_name(jid, name)
+                        logger.debug("Display name cached for %s: %s", jid, name)
+                except Exception as e:
+                    logger.debug("Display name fetch failed for %s: %s", jid, e)
+    except asyncio.CancelledError:
+        logger.debug("Avatar poll task cancelled")
+
+
+async def _send_queue_poll_task(layer, poll_interval: int = 3):
+    """
+    Background asyncio task that processes outgoing message requests
+    queued by the dashboard via ``data/send_queue.json``.
+
+    Every *poll_interval* seconds this task reads and clears the queue,
+    then dispatches each task to the appropriate bot command
+    (``msg.send`` for text, ``msg.sendmedia`` for media).
+    """
+    try:
+        if not _db.db_path and not os.environ.get("AGENT_MODE"):
+            logger.debug("Send queue poll task: no dashboard DB configured, exiting")
+            return
+
+        logger.debug("Send queue poll task started (interval=%ds)", poll_interval)
+        while True:
+            await asyncio.sleep(poll_interval)
+            try:
+                from app.dashboard.utils.send_queue import dequeue_send_tasks, write_send_result
+                # Only dequeue tasks destined for THIS bot (or wildcard tasks)
+                bot_id = layer.bot.botId or ""
+                tasks = dequeue_send_tasks(bot_jid=bot_id)
+            except Exception as exc:
+                logger.debug("Send queue read failed: %s", exc)
+                continue
+
+            for task in tasks:
+                task_id  = task.get("id", "?")
+                to_jid   = task.get("to_jid", "")
+                mtype    = (task.get("message_type") or "text").lower()
+                content  = task.get("content") or ""
+                media_url = task.get("media_url")
+                caption   = task.get("caption")
+                try:
+                    if mtype == "text":
+                        if not content:
+                            raise ValueError("text message has empty content")
+                        await layer.executeCommand("msg.send", [to_jid, content])
+                        layer._save_msg_to_dashboard(
+                            user_jid=to_jid, direction="out",
+                            content=content, message_type="text",
+                            source="manual",
+                        )
+                    else:
+                        if not media_url:
+                            raise ValueError(f"{mtype} message has no media_url")
+                        # params: [to, media_url, type, caption_or_empty]
+                        params = [to_jid, media_url, mtype]
+                        if caption:
+                            params.append(caption)
+                        await layer.executeCommand("msg.sendmedia", params)
+                        layer._save_msg_to_dashboard(
+                            user_jid=to_jid, direction="out",
+                            content=caption or media_url, message_type=mtype,
+                            source="manual",
+                        )
+                    write_send_result(task_id, success=True)
+                    logger.info("Send queue: task %s sent to %s (%s)", task_id, to_jid, mtype)
+                except Exception as exc:
+                    write_send_result(task_id, success=False, detail=str(exc))
+                    logger.warning("Send queue: task %s failed: %s", task_id, exc)
+    except asyncio.CancelledError:
+        logger.debug("Send queue poll task cancelled")
+
 
 class ZowBotLayer(YowInterfaceLayer):
 
@@ -137,11 +282,17 @@ class ZowBotLayer(YowInterfaceLayer):
         self.pingCount = 0             
         self.ctxMap = {}
         self._qrTask = None
+        self._avatarTask = None
         self.loginFailCount = 0
         self.pairingStatus = None
         
         # AI auto-reply service (Phase 1: Mock mode)
         self.ai_service = None
+        # Dashboard DB path — set once CONFIG is loaded; used for direct message persistence
+        self._dashboard_db_path: "str | None" = None
+
+        # Satisfaction survey plugin (None until onSuccess)
+        self._satisfaction: SatisfactionPlugin | None = None
 
     async def _sendIqAsync(self, entity):
         """
@@ -285,7 +436,10 @@ class ZowBotLayer(YowInterfaceLayer):
             })          
 
         self.isConnected = False
-                
+
+        if self._satisfaction:
+            self._satisfaction.stop()
+
         if self.ai_service:
             self.ai_service.cancel_retry_task()
                    
@@ -350,7 +504,10 @@ class ZowBotLayer(YowInterfaceLayer):
                 for  item in entity.collections:
                     collectionNames.append(item["name"])
             self.logger.info("Notification: Received a ServerSync Notification, collections=%s" % ",".join(collectionNames))
-            self.syncData([','.join(collectionNames)] ,{})
+            try:
+                await self.syncData([','.join(collectionNames)] ,{})
+            except Exception as e:
+                self.logger.warning("syncData failed, continuing: %s", e)
             
         if isinstance(entity,AccountSyncNotificationProtocolEntity):
             self.logger.info("Notification: Received a AccountSync Notification")            
@@ -571,6 +728,20 @@ class ZowBotLayer(YowInterfaceLayer):
                         "value":entity.setId
                     }
                 })
+                # Proactively re-fetch and cache the new avatar in the dashboard DB
+                async def _refresh_avatar(jid: str) -> None:
+                    try:
+                        if not _db.db_path:
+                            return
+                        result = await self.executeCommand("contact.getavatar", [jid])
+                        url = (result or {}).get("url")
+                        if url:
+                            _db.save_avatar_url(jid, url)
+                            _db.notify_avatar_updated(jid, url)
+                            self.logger.debug("Avatar refreshed for %s after SetPicture notification", jid)
+                    except Exception as _exc:
+                        self.logger.debug("Avatar refresh failed for %s: %s", jid, _exc)
+                asyncio.ensure_future(_refresh_avatar(entity.setJid))
             return      
 
         if isinstance(entity,BusinessNameUpdateNotificationProtocolEntity):
@@ -672,6 +843,7 @@ class ZowBotLayer(YowInterfaceLayer):
 
         if isinstance(entity, MultiDevicePairSuccessIqProtocolEntity):                               
             jid = entity.jid
+            print(jid, flush=True)  # signal login success to dashboard SSE stream
             self.setProp("refs",None)          
             self.setProp("jid",jid)     
             self.setProp("botType",ZowBotType.TYPE_RUN_SINGLETON)
@@ -717,8 +889,14 @@ class ZowBotLayer(YowInterfaceLayer):
 
             self.detect40x = True            
 
-            if entity.reason!="405" and self.bot.bot_type!=ZowBotType.TYPE_RUN_TEMP:
-                pass                
+            if entity.reason != "405" and self.bot.bot_type != ZowBotType.TYPE_RUN_TEMP:
+                # Permanent ban / unauthorized — mark offline immediately so the
+                # dashboard doesn't keep showing the bot as running.
+                _db.clear_status()
+                # Record this account as permanently failed in the dashboard.
+                _db.mark_phone_failed(self.bot.botId)
+                # Quit the bot process now; no point staying connected.
+                self.bot.quit()
 
             self.loginEvent.set()        
 
@@ -749,7 +927,7 @@ class ZowBotLayer(YowInterfaceLayer):
                 }
             
             conf = configparser.ConfigParser()
-            conf.read(config_path)
+            conf.read(config_path, encoding='utf-8')
             
             ai_config = {
                 'ai_llm_active': {},
@@ -792,7 +970,20 @@ class ZowBotLayer(YowInterfaceLayer):
             if conf.has_section('AI_FILTER'):
                 ai_config['ai_filter']['p2p_only'] = conf.getboolean('AI_FILTER', 'p2p_only', fallback=True)
                 ai_config['ai_filter']['skip_self_device'] = conf.getboolean('AI_FILTER', 'skip_self_device', fallback=True)
-            
+
+            # Read AI_SATISFACTION section
+            if conf.has_section('AI_SATISFACTION'):
+                ai_config['ai_satisfaction'] = {
+                    'enabled': conf.getboolean('AI_SATISFACTION', 'enabled', fallback=False),
+                    'timeout_minutes': conf.getint('AI_SATISFACTION', 'timeout_minutes', fallback=30),
+                    'question_text': conf.get('AI_SATISFACTION', 'question_text',
+                        fallback='请问这次回答对您有帮助吗？请回复 1-5 分（1=很差，5=非常好）'),
+                    'thank_you_text': conf.get('AI_SATISFACTION', 'thank_you_text',
+                        fallback='感谢您的反馈！'),
+                }
+            else:
+                ai_config['ai_satisfaction'] = {'enabled': False, 'timeout_minutes': 30}
+
             self.logger.debug(f"AI config loaded: {ai_config}")
             return ai_config
             
@@ -804,7 +995,8 @@ class ZowBotLayer(YowInterfaceLayer):
                 'ai_llm_qwen': {'auth_mode': 'apikey', 'api_key': '', 'model': 'qwen-plus'},
                 'ai_memory': {'memory_window_days': 3, 'cleanup_strategy': 'first_daily_message'},
                 'ai_retry': {'retry_delay_minutes': 5, 'max_retry_attempts': 1, 'enabled': True},
-                'ai_filter': {'p2p_only': True, 'skip_self_device': True}
+                'ai_filter': {'p2p_only': True, 'skip_self_device': True},
+                'ai_satisfaction': {'enabled': False, 'timeout_minutes': 30},
             }
 
     @ProtocolEntityCallback("success")
@@ -849,6 +1041,23 @@ class ZowBotLayer(YowInterfaceLayer):
         await self.toLower(entity)         
         self.bot.status = ZowBotStatus.STATUS_RUNNING   
 
+        # Start avatar polling background task (dashboard IPC)
+        if self._avatarTask is None or self._avatarTask.done():
+            try:
+                loop = asyncio.get_event_loop()
+                self._avatarTask = loop.create_task(_avatar_poll_task(self))
+                self.logger.debug("Avatar poll task scheduled")
+            except Exception as exc:
+                self.logger.debug("Could not schedule avatar poll task: %s", exc)
+
+        # Start send-queue polling background task (dashboard outgoing messages)
+        if getattr(self, "_sendQueueTask", None) is None or self._sendQueueTask.done():
+            try:
+                loop = asyncio.get_event_loop()
+                self._sendQueueTask = loop.create_task(_send_queue_poll_task(self))
+                self.logger.debug("Send queue poll task scheduled")
+            except Exception as exc:
+                self.logger.debug("Could not schedule send queue poll task: %s", exc)
 
         self.bot.lastOnlineTime = int(time.time()) 
 
@@ -873,23 +1082,43 @@ class ZowBotLayer(YowInterfaceLayer):
                 if not ai_config.get('ai_llm_active', {}).get('enabled', True):
                     self.logger.debug("🔇 AI module disabled in config")
                     self.ai_service = None
+                    # Still wire up dashboard DB path so messages are persisted
+                    self._dashboard_db_path = _db.db_path
                     return
                 
                 self.ai_service = AIService(
                     db_path=str(db_file),
-                    config=ai_config                    
+                    config=ai_config
                 )
+                # Phase 2: Wire up dashboard db for AI thought recording
+                self.ai_service.dashboard_db_path = _db.db_path
+                self._dashboard_db_path = _db.db_path  # None in agent mode — that's fine
+                # Phase 3: Wire up strategy manager
+                self.ai_service.strategy_manager = _db.get_strategy_manager()
                 
                 # Set up send response callback for retry manager
                 self.ai_service.set_send_response_callback(self._ai_send_response)
                 
                 # Phase 1.5: Start background retry task
                 self.ai_service.start_retry_task(check_interval_seconds=60)
-                
+
                 self.logger.info(f"AI service initialized for account {self.bot.botId}")
                 self.logger.debug(f"Retry manager started (enabled={ai_config.get('ai_retry', {}).get('enabled', False)})")
+
+                # Satisfaction plugin — (re)create on every login so db_path is fresh
+                self._satisfaction = SatisfactionPlugin.from_config(
+                    config       = ai_config.get('ai_satisfaction', {}),
+                    send_fn      = self._ai_send_response,
+                    db_path      = self._dashboard_db_path,
+                    logger       = self.logger,
+                    is_connected = lambda: self.isConnected,
+                )
+                self._satisfaction.start(asyncio.get_event_loop())
             elif self.ai_service:
                 self.logger.debug("AI service already initialized, skipping init")
+                # Restart satisfaction plugin timer on reconnect (stop() was called on disconnect)
+                if self._satisfaction:
+                    self._satisfaction.start(asyncio.get_event_loop())
             else:
                 self.logger.warning(f"Cannot initialize AI service: db={self.db is not None}")
         except Exception as e:
@@ -1013,16 +1242,12 @@ class ZowBotLayer(YowInterfaceLayer):
         """
         Send message acknowledgments with probabilistic behavior.
         
-        - Sends first ack (received notification) with 80% probability
-        - If first ack sent, waits 1-5 seconds randomly
+        - Sends first ack (received notification) with 80% probability        
         - Then sends second ack (read notification)
         """
 
         if random.random() < 0.8:
-            await self.toLower(messageProtocolEntity.ack())
-            # Wait 1-5 seconds randomly before sending read ack
-            wait_time = random.uniform(1, 5)
-            await asyncio.sleep(wait_time)
+            await self.toLower(messageProtocolEntity.ack())            
         else:
             logger.debug("Not sending received ack for message %s" % messageProtocolEntity.getId())
         
@@ -1041,7 +1266,6 @@ class ZowBotLayer(YowInterfaceLayer):
             from core.layers.protocol_messages.protocolentities.message_extendedtext import ExtendedTextMessageProtocolEntity
             from core.layers.protocol_messages.protocolentities.attributes.attributes_message_meta import MessageMetaAttributes
             from core.layers.protocol_messages.protocolentities.attributes.attributes_extendedtext import ExtendedTextAttributes
-            from core.layers.protocol_messages.jid import Jid
             
             # Create response message attributes
             attr = ExtendedTextAttributes(
@@ -1065,7 +1289,98 @@ class ZowBotLayer(YowInterfaceLayer):
             
         except Exception as send_err:
             self.logger.error(f"Failed to send AI retry response to {user_jid}: {send_err}", exc_info=True)
-    
+
+    # ── Dashboard direct persistence ────────────────────────────────────────
+
+    def _save_msg_to_dashboard(
+        self, user_jid: str, direction: str, content: str,
+        message_type: str = "text", participant: str | None = None,
+        notify: str | None = None,
+        media_path: str | None = None,
+        source: str | None = None,
+    ) -> None:
+        """
+        Write a single chat message row to dashboard.db.
+        Fire-and-forget — never raises, never crashes the caller.
+        Called for every incoming/outgoing text/media message, independent of AI.
+        participant: for group messages, the JID of the individual sender.
+        notify: display name (pushname) of the sender.
+        media_path: absolute local path to a downloaded media file.
+        source: 'ai' for AI-generated replies, 'manual' for human-operator sends, None for incoming.
+        """
+        if not content:
+            return
+        # In AGENT_MODE the bridge forwards to the backend server via HTTP.
+        if os.environ.get("AGENT_MODE"):
+            _db.save_chat_message(
+                bot_jid=self.bot.botId or "",
+                user_jid=user_jid,
+                direction=direction,
+                content=content,
+                message_type=message_type,
+                participant=participant,
+                notify=notify,
+                media_path=media_path,
+                source=source,
+            )
+            return
+        db_path = self._dashboard_db_path
+        if not db_path:
+            return
+        try:
+            import sqlite3 as _sqlite3
+            import time as _time
+            conn = _sqlite3.connect(db_path, timeout=5)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute(
+                    "INSERT INTO chat_messages "
+                    "(user_jid, direction, content, message_type, timestamp, bot_jid, participant, notify, media_path, source) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (user_jid, direction, content, message_type, int(_time.time()), self.bot.botId, participant, notify, media_path, source),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            self.logger.warning(f"dashboard direct save failed: {exc}")
+
+    def _update_group_member_last_seen(self, group_jid: str, participant: str) -> None:
+        """
+        Stamp group_members.last_seen for the participant who just sent a message.
+
+        In LID-mode groups the incoming participant identifier ends with ``@lid``
+        (e.g. ``38097098133757@lid``).  In that case we match against the stored
+        ``participant_lid`` column.  For normal groups we match ``participant_jid``.
+        """
+        db_path = self._dashboard_db_path
+        if not db_path or not participant:
+            return
+        try:
+            import sqlite3 as _sqlite3
+            import time as _time
+            now = int(_time.time())
+            conn = _sqlite3.connect(db_path, timeout=5)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                if participant.endswith("@lid"):
+                    conn.execute(
+                        "UPDATE group_members SET last_seen = ? "
+                        "WHERE group_jid = ? AND participant_lid = ?",
+                        (now, group_jid, participant),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE group_members SET last_seen = ? "
+                        "WHERE group_jid = ? AND participant_jid = ?",
+                        (now, group_jid, participant),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            self.logger.debug("group_members last_seen update failed: %s", exc)
+
     def _parse_jid_and_lid(self, messageProtocolEntity):
         """
         Parse and extract JID and LID from messageProtocolEntity.
@@ -1078,6 +1393,11 @@ class ZowBotLayer(YowInterfaceLayer):
         if _from.endswith("lid"):
             lid = Utils.normalize_jid(_from)
             jid = messageProtocolEntity.getSenderPn()
+            # sender_pn is sometimes absent; fall back to notify if it looks like a JID
+            if not jid:
+                notify = messageProtocolEntity.getNotify()
+                if notify and notify.endswith("s.whatsapp.net"):
+                    jid = notify
         else:
             jid = Utils.normalize_jid(_from)
             lid = messageProtocolEntity.getSenderLid()
@@ -1163,7 +1483,10 @@ class ZowBotLayer(YowInterfaceLayer):
         jid, lid = self._parse_jid_and_lid(messageProtocolEntity)
    
         if self.db:
-            self.db._store.updateContact(jid=jid,lid=lid,name=messageProtocolEntity.getNotify())
+            notify = messageProtocolEntity.getNotify()
+            # Don't store a JID-formatted string as a display name
+            contact_name = None if (notify and '@' in notify) else notify
+            self.db._store.updateContact(jid=jid, lid=lid, name=contact_name)
 
         # Parse message type and extract text
         type, text = self._parse_message_type(messageProtocolEntity)
@@ -1199,15 +1522,74 @@ class ZowBotLayer(YowInterfaceLayer):
         # Send message acks with probabilistic behavior
         await self._async_send_message_acks(messageProtocolEntity)        
         
+        # Satisfaction plugin: intercept 1-5 rating replies before AI processing
+        # Must run before _save_msg_to_dashboard so survey replies are NOT recorded in chat history
+        if text and not messageProtocolEntity.fromme and self._satisfaction:
+            if await self._satisfaction.intercept(jid, text):
+                return
+
+        # Persist messages: either to local dashboard.db (DASHBOARD_MODE) or forward
+        # to backend server via HTTP (AGENT_MODE).  The two are mutually exclusive.
+        if text and (self._dashboard_db_path or os.environ.get("AGENT_MODE")):            
+            direction = "out" if messageProtocolEntity.fromme else "in"
+            participant = messageProtocolEntity.getParticipant() or None
+            notify = messageProtocolEntity.getNotify() or None
+            # Fix UTF-8 mojibake: protocol may deliver UTF-8 bytes decoded as
+            # Latin-1, producing Ð© sequences (same issue as group subject).
+            if notify:
+                try:
+                    notify = notify.encode("latin-1").decode("utf-8")
+                except (UnicodeEncodeError, UnicodeDecodeError):
+                    pass  # already valid Unicode
+            # Download media to disk for displayable types
+            db_message_type = "text"
+            media_path: str | None = None
+            _DOWNLOADABLE = (
+                ImageDownloadableMediaMessageProtocolEntity,
+                VideoDownloadableMediaMessageProtocolEntity,
+                AudioDownloadableMediaMessageProtocolEntity,
+                DocumentDownloadableMediaMessageProtocolEntity,
+                StickerDownloadableMediaMessageProtocolEntity,
+            )
+            if isinstance(messageProtocolEntity, _DOWNLOADABLE):
+                # Use __class__ because the local 'type' variable is shadowed by
+                # _parse_message_type's return value (a protobuf int enum).
+                _cls = messageProtocolEntity.__class__
+                _type_map = {
+                    ImageDownloadableMediaMessageProtocolEntity: "IMAGE",
+                    VideoDownloadableMediaMessageProtocolEntity: "VIDEO",
+                    AudioDownloadableMediaMessageProtocolEntity: "AUDIO",
+                    DocumentDownloadableMediaMessageProtocolEntity: "DOCUMENT",
+                    StickerDownloadableMediaMessageProtocolEntity: "STICKER",
+                }
+                db_message_type = _type_map.get(_cls, "IMAGE")
+                try:
+                    # Use entity-level properties (.url/.media_key/.mimetype) which are
+                    # proxied from downloadablemedia_specific_attributes, not media_specific_attributes.
+                    media_path = self.download({
+                        "url": messageProtocolEntity.url,
+                        "filename": messageProtocolEntity.getId(),
+                        "type": db_message_type,
+                        "media_key": messageProtocolEntity.media_key,
+                        "mimetype": messageProtocolEntity.mimetype,
+                    })
+                except Exception as dl_exc:
+                    self.logger.warning("Media download failed for %s: %s", jid, dl_exc)
+            self._save_msg_to_dashboard(jid, direction, text, message_type=db_message_type, participant=participant, notify=notify, media_path=media_path)
+            # Update last_seen for group messages (participant is the sender's JID or LID)
+            if participant and jid.endswith("@g.us"):
+                self._update_group_member_last_seen(jid, participant)
+
         # AI auto-reply processing (Phase 1.5: real API mode with message sending)
         if self.ai_service:
             try:
-                ai_response = await self.ai_service.process_message(
+                ai_result = await self.ai_service.process_message(
                     messageProtocolEntity,
                     user_jid=jid,
                     bot_id=self.bot.botId
                 )
-                if ai_response:
+                if ai_result:
+                    ai_response = ai_result.response
                     self.logger.info(f"AI response ready : {ai_response[:100]}")
                     
                     # Send AI response back to sender
@@ -1237,7 +1619,9 @@ class ZowBotLayer(YowInterfaceLayer):
                         )                        
                         self.bot.botLayer.ackQueue.append(response_entity.getId())                        
                         self.logger.info(f"Sending AI response to {sender_jid}")
-                        await self.toLower(response_entity)                        
+                        await self.toLower(response_entity)
+                        if self._satisfaction:
+                            self._satisfaction.record_ai_reply(jid)
                     except Exception as send_err:
                         self.logger.error(f"Failed to send AI response: {send_err}", exc_info=True)
             except Exception as e:
@@ -1281,9 +1665,12 @@ class ZowBotLayer(YowInterfaceLayer):
 
         isCompanion = "_" in self.bot.botId
 
-        jid = Jid.normalize(to)    
+        jid = Jid.normalize(to)
 
-        if not jid.endswith("@lid"):
+        if jid.endswith("@g.us"):
+            # Group JIDs need no contact-sync — send directly
+            await send_func(cmdParams, options)
+        elif not jid.endswith("@lid"):
             foundContact = self.db._store.findContact(jid)        
             if not foundContact and not isCompanion:                
                 entity = ContactGetSyncIqProtocolEntity([to],mode = "delta")    
@@ -1301,6 +1688,8 @@ class ZowBotLayer(YowInterfaceLayer):
                     if len(jid)>0:
                         cmdParams[0]=','.join(jid)
                         await redo_func(cmdParams,options)                
+                    else:
+                        logger.error("target not found in contacts")
                 else:
                     logger.error("ERROR on _sendIq")   
 
@@ -1453,7 +1842,8 @@ class ZowBotLayer(YowInterfaceLayer):
                 else:
                     raise Exception(f"Unexpected response type: {type(entity_result)}")
         
+        except asyncio.TimeoutError as e:
+            logger.warning("syncData timeout (collections=%s): %s", cmdParams[0], e)
         except Exception as e:
-            logger.error(f"syncData error: {e}")
-            raise
+            logger.error("syncData error: %s", e, exc_info=True)
 

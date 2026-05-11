@@ -11,6 +11,8 @@ from core.profile.profile import YowProfile
 from app.device_env import DeviceEnv
 from app.zowbot_values import ZowBotType
 
+from app.dashboard.bridge import dashboard as _db
+
 logger = logging.getLogger(__name__)
 
 class Main(ConsoleMain):
@@ -69,6 +71,7 @@ class Main(ConsoleMain):
  
         wabot = ZowBot(bot_id=botId,env=self.env,bot_type=ZowBotType.TYPE_RUN_SINGLETON)        
 
+        _db.write_status(running=True, jid=botId, phone=botId)
 
         if botId:
             logger.info(self.env.networkEnv)
@@ -120,8 +123,8 @@ if __name__ == "__main__":
         params,options = Utils.cmdLineParser(sys.argv)
 
     Main().run(params,options)    
-    
-    
+
+    _db.clear_status(phone=params[0] if params else None)
 
 
 

@@ -17,8 +17,11 @@ class BotSendCommand(BotCommand):
 
         to,*other = params
         isCompanion = "_" in self.bot.botId
-        jid = Jid.normalize(to)    
-        if not jid.endswith("@lid"):
+        jid = Jid.normalize(to)
+        if jid.endswith("@g.us"):
+            # Group JIDs need no contact-sync — send directly
+            await send_func(params, options)
+        elif not jid.endswith("@lid"):
             foundContact = self.bot.botLayer.db._store.findContact(jid)        
             if not foundContact and not isCompanion:      
                 try:          
@@ -33,13 +36,15 @@ class BotSendCommand(BotCommand):
                             jid.append(value["jid"])
                         else:
                             logger.info("%s not found",key)
-                    if len(jid)>0:
-                        params[0]=','.join(jid)
-                        await redo_func(params,options)      
-                    else:
-                        logger.error("target not found in contacts")   
                 except Exception as e:
                     logger.error(f"Error syncing contacts: {e}")
+                    return
+
+                if len(jid)>0:
+                    params[0]=','.join(jid)
+                    await redo_func(params,options)      
+                else:
+                    logger.error("target not found in contacts")
 
             else:
                 logger.info("target in contacts")                       

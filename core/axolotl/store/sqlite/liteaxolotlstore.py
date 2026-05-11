@@ -127,11 +127,12 @@ class LiteAxolotlStore(AxolotlStore):
         return self.contactStore.getAllContact()
     
     def findContact(self,jid) -> Any:
+        
 
         if jid.endswith("lid"):
-            return self.contactStore.findContact(lid = jid)
+            return self.contactStore.findContact(jid=None,lid = jid)
         else:
-            return self.contactStore.findContact(jid = jid)
+            return self.contactStore.findContact(jid = jid,lid=None)
 
     
     def addBroadcast(self,jids,senderJid,name=None) -> Any:
@@ -140,9 +141,9 @@ class LiteAxolotlStore(AxolotlStore):
     def findParticipantsByBcid(self,bcid) -> Any:
         return self.broadcastStore.findParticipantsByBcid(bcid)
     
-    def updateTctoken(self, node) -> Any:
-        return self.contactStore.updateTctoken(node)
-
+    def updateTctoken(self,jid, lid, tctoken, tctoken_ts) -> Any:
+        return self.contactStore.updateTctoken(jid=jid, lid=lid, tctoken=tctoken, tctoken_ts=tctoken_ts)
+    
     def getTctoken(self,jid=None) -> Any:
 
         if jid.endswith("lid"):

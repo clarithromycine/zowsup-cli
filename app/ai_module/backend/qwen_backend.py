@@ -55,22 +55,23 @@ class QWENBackend(AIBackendBase):
                    f"auth_mode={self.auth_mode}")
     
     async def send_message(self, user_message: str,
-                          memory_context: List[Dict]) -> str:
+                          memory_context: List[Dict],
+                          system_extra: str = "") -> str:
         """
         Send message to QWEN backend.
-        
+
         Args:
             user_message: User's question
             memory_context: Past conversation history (3-day window)
-        
+            system_extra: Optional strategy instructions to append to system prompt
+
         Returns:
             str: AI response
-        
+
         Raises:
             AIBackendException: On API errors
         """
-        
-        return await self._real_send_message(user_message, memory_context)
+        return await self._real_send_message(user_message, memory_context, system_extra)
     
     def _mock_send_message(self, user_message: str,
                           memory_context: List[Dict]) -> str:
@@ -87,7 +88,7 @@ class QWENBackend(AIBackendBase):
         context_str = ""
         if memory_context:
             context_str = "过去对话:\n"
-            for item in memory_context[-10:]:  # Last 10 items (most recent)
+            for item in memory_context:  # pre-sliced by AIService (context_turns)
                 context_str += f"用户: {item.get('user_message', '')}\n"
                 context_str += f"我: {item.get('ai_response', '')}\n"
         
@@ -167,7 +168,8 @@ class QWENBackend(AIBackendBase):
             raise AIBackendException(f"Unsupported auth mode: {self.auth_mode}")
     
     async def _real_send_message(self, user_message: str,
-                               memory_context: List[Dict]) -> str:
+                               memory_context: List[Dict],
+                               system_extra: str = "") -> str:
         """
         Real QWEN API call.
         
@@ -193,13 +195,16 @@ class QWENBackend(AIBackendBase):
             
             if memory_context:
                 context_str = "以下是过去的对话记录:\n"
-                for item in memory_context[-10:]:  # Last 10 items (most recent)
+                for item in memory_context:  # pre-sliced by AIService (context_turns)
                     context_str += f"用户: {item.get('user_message', '')}\n"
                     context_str += f"助手: {item.get('ai_response', '')}\n"
                 
                 system_prompt = "你是一个有用且友好的WhatsApp助手,帮助用户回答问题。" + context_str
             else:
                 system_prompt = "你是一个有用且友好的WhatsApp助手,帮助用户回答问题。"
+
+            if system_extra:
+                system_prompt += system_extra
             
             messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": user_message})

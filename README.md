@@ -1,50 +1,65 @@
 
+# Zowsup-CLI
+
+A restructured [Zowsup](https://github.com/clarithromycine/zowsup/) with async architecture, AI integration, and a full-stack web dashboard for monitoring and managing WhatsApp bot accounts.
+
 ---
 
-# Zowsup-CLI: Advanced WhatsApp Protocol CLI Client
+## Architecture
 
-**A comprehensive restructuring of [Zowsup](https://github.com/clarithromycine/zowsup/) with full-stack async architecture, enhanced prompt engineering, and integrated AI capabilities.**
+The system uses a three-tier model:
 
-> Zowsup-CLI represents a complete overhaul of the original Zowsup project, rebuilt from the ground up with modern async/await patterns, intelligent prompt handling, and machine learning integration for advanced WhatsApp protocol interactions.
+```
+┌─────────────────────────────────────────────────┐
+│  Server  (Flask + SocketIO, port 5000)           │
+│  ─ REST API, WebSocket, dashboard UI             │
+│  ─ SQLite DB (WAL mode)                          │
+│  ─ Agent registry, command dispatch              │
+└────────────────┬────────────────────────────────┘
+                 │  WebSocket  /agent namespace
+        ┌────────┴────────┐          ┌──────────────┐
+        │  Agent A  (PC)  │          │  Agent B ... │
+        │  script/agent.py│          │              │
+        └────────┬────────┘          └──────────────┘
+                 │  subprocess
+         ┌───────┴────────┐
+         │  Bot (phone)   │  ← script/main.py
+         │  Bot (phone)   │
+         └────────────────┘
+```
 
-## 🌟 Key Improvements Over Zowsup
+| Tier | Process | Responsibility |
+|---|---|---|
+| **Server** | `script/dashboard_server.py` | Central hub — stores data, serves UI, dispatches commands to agents |
+| **Agent** | `script/agent.py` | Runs on any machine that hosts WhatsApp accounts; manages local bot subprocesses; connects back to the server via WebSocket |
+| **Bot** | `script/main.py` | One process per WhatsApp phone number; handles the actual WA protocol |
 
-### **1. Full-Stack AsyncIO Architecture**
-- **End-to-end async/await implementation** across all protocol layers
-- Eliminated threading bottlenecks with native Python asyncio
-- Superior concurrency handling for multi-account operations
-- Non-blocking I/O for all network operations
+The Server and Agent(s) can run on different machines. Multiple agents can be connected simultaneously, each managing a different set of phone numbers.
 
-### **2. Enhanced Prompt Engineering**
-- Intelligent context-aware prompt generation and validation
-- Structured prompt pipelines for complex operations
-- AI-powered parameter suggestions and auto-completion
-- Improved error handling with descriptive, actionable prompts
+---
 
-### **3. Integrated AI Module**
-- Machine learning-powered message analysis and classification
-- Intelligent account state prediction and recovery
-- AI-assisted protocol optimization
-- Anomaly detection for security-critical operations
-- Smart resource allocation and load balancing
+## Requirements
 
-## 🚀 Quick Start
+- Python 3.10+
+- Node.js 18+ (dashboard frontend only)
 
-### Installation
+---
+
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Configuration
+---
 
-Copy and configure the settings file:
+## Configuration
 
 ```bash
-cp ./conf/config.conf.example ./conf/config.conf
+cp conf/config.conf.example conf/config.conf
 ```
 
-Edit `./conf/config.conf` with your environment:
+Edit `conf/config.conf`:
 
 ```ini
 PLATFORM=linux
@@ -55,228 +70,345 @@ DOWNLOAD_PATH=/data/tmp/
 UPLOAD_PATH=/data/tmp/
 LOG_PATH=/data/log/
 DEFAULT_ENV=android
-
-# AND SOME AI MODULE PARAMS DECLARATION IN THE FOLLOWING SECTION
-
 ```
 
-### Account Import/Export
+---
 
-**Import account from 6-parts backup:**
+## Running the bot
 
 ```bash
-python script/import6.py [6-parts-account-data] --env android
-# Supported environments: android, smb_android, ios, smb_ios
+python script/main.py [account-number]
+python script/main.py [account-number] --debug
+python script/main.py [account-number] --proxy "host:port:user:pass"
 ```
 
-**Export account to 6-parts backup:**
- 
-```
- python script/export6.py [account-number]
+No account number starts **interactive mode** (useful for testing commands).
 
-```
+---
 
+## Account management
 
-### Run
+### Register a new companion device
 
 ```bash
-python script/main.py [account-number] --env android
-```
-
-### Register as Companion Device
-
-**Using QR Code Scan:**
-
-```bash
+# QR code scan
 python script/regwithscan.py
-```
 
-**Using Link Code:**
-
-```bash
+# Link code (recommended)
 python script/regwithlinkcode.py [account-number]
 ```
 
-And then you can get a [account-number]_[device-id] pattern as a login companion account
+After registration you get an `[account-number]_[device-id]` account directory.
 
-## 🔧 Command System
-
-The command system is built with **async-first** architecture and **AI-enhanced** parameter validation.
-
-### Syntax
+### Import / export (6-segment backup format)
 
 ```bash
-# Shell execution
-python script/main.py [account-number] [command] [parameters]
+# Import
+python script/import6.py "[6-segment-string]" --env android
 
-# Interactive mode
-[command] [parameters]
+# Export
+python script/export6.py [account-number]
 ```
 
-### Available Commands
+Supported `--env` values: `android`, `smb_android`, `ios`, `smb_ios`
 
-#### Account Management
-| Command | Description |
-|---------|-------------|
-| `account.init` | Initialize account (first login) |
-| `account.info` | Get account registration info |
-| `account.getname` | Get account name |
-| `account.setname` | Set account name |
-| `account.getavatar` | Get account avatar |
-| `account.setavatar` | Set account avatar |
-| `account.getemail` | Get account email |
-| `account.setemail` | Set account email |
-| `account.verifyemail` | Request email verification |
-| `account.verifyemailcode` | Verify email code |
-| `account.set2fa` | Enable/configure 2FA |
+---
 
-#### Contact Management
-| Command | Description |
-|---------|-------------|
-| `contact.list` | Get contact list |
-| `contact.sync` | Sync contacts (AI-optimized) |
-| `contact.getprofile` | Get contact profile |
-| `contact.getavatar` | Get contact avatar |
-| `contact.getdevices` | Get contact device list |
-| `contact.trust` | Trust contact identity |
+## Commands
 
-#### Group Management
+### Shell mode
+
+```bash
+python script/main.py [account-number] [command] [params...]
+```
+
+### Interactive mode
+
+```
+[command] [params...]
+```
+
+### Reference
+
+#### Account
 | Command | Description |
-|---------|-------------|
-| `group.create` | Create a new group |
-| `group.list` | List all groups |
-| `group.info` | Get group information |
-| `group.join` | Join group with invite code |
+|---|---|
+| `account.init` | First login / initialize account |
+| `account.info` | Registration info |
+| `account.getname` / `account.setname` | Get / set push name |
+| `account.getavatar` / `account.setavatar` | Get / set avatar |
+| `account.getemail` / `account.setemail` | Get / set email |
+| `account.verifyemail` / `account.verifyemailcode` | Email verification |
+| `account.set2fa` | Configure 2FA |
+
+#### Contacts
+| Command | Description |
+|---|---|
+| `contact.list` | List contacts |
+| `contact.sync` | Sync contacts |
+| `contact.getprofile` | Get profile |
+| `contact.getavatar` | Get avatar |
+| `contact.getdevices` | List devices |
+| `contact.trust` | Trust identity key |
+
+#### Groups
+| Command | Description |
+|---|---|
+| `group.create` | Create group |
+| `group.list` | List groups |
+| `group.info` | Get group info |
+| `group.join` | Join via invite code |
 | `group.leave` | Leave group |
-| `group.add` | Add member(s) to group |
-| `group.remove` | Remove member from group |
-| `group.promote` | Promote member to admin |
-| `group.demote` | Demote member from admin |
+| `group.add` / `group.remove` | Add / remove members |
+| `group.promote` / `group.demote` | Change admin role |
 | `group.approve` | Approve pending members |
 | `group.seticon` | Set group icon |
-| `group.getinvite` | Get group invite code |
+| `group.getinvite` | Get invite code |
 
-#### Messaging (AI-Powered)
+#### Messaging
 | Command | Description |
-|---------|-------------|
-| `msg.send` | Send text message |
-| `msg.sendmedia` | Send media message |
-| `msg.sendad` | Send advertisement message |
+|---|---|
+| `msg.send` | Send text |
+| `msg.sendmedia` | Send media |
+| `msg.sendad` | Send ad message |
 | `msg.quotedreply` | Send quoted reply |
 | `msg.edit` | Edit sent message |
 | `msg.revoke` | Revoke message |
 
-#### Multi-Device Protocol
+#### Multi-device
 | Command | Description |
-|---------|-------------|
-| `md.devices` | List paired devices |
-| `md.link` | Link companion device with QR |
-| `md.inputcode` | Input pair code |
-| `md.remove` | Remove companion device(s) |
+|---|---|
+| `md.devices` | List linked devices |
+| `md.link` | Link device via QR |
+| `md.inputcode` | Link via pair code |
+| `md.remove` | Unlink device(s) |
 
-#### Business/Misc Operations
+#### Misc / Business
 | Command | Description |
-|---------|-------------|
-| `misc.checkactive` | Validate phone numbers |
-| `misc.bizfeatures` | Check business account features |
-| `misc.bizintegrity` | Verify business account integrity |
-| `misc.prekeycount` | Query prekey count from server |
-| `misc.reachouttimelock` | Query reachout timelock |
-| `msgshortlink.get` | Get short link |
-| `msgshortlink.decode` | Decode short link info |
-| `msgshortlink.setmsg` | Set message in short link |
-| `msgshortlink.reset` | Reset short link |
-| `newsletter.join` | Join newsletter |
-| `newsletter.leave` | Leave newsletter |
-| `newsletter.metadata` | Get newsletter metadata |
-| `newsletter.recommended` | Get recommended newsletters |
-| `newsletter.directorylist` | List newsletter directory |
-| `newsletter.directorysearch` | Search newsletters |
-
-## 🌐 Proxy Configuration
-
-Enable proxy with dynamic session/location support:
-
-```bash
-python script/main.py [account-number] --proxy "host:port:username:password"
-```
-
-Supported dynamic replacements:
-- `{location}` - Current session location
-- `{session_id}` - Current session identifier
-
-## 🧠 AI Module Architecture
-
-The integrated AI module provides:
-
-- **Intelligent Message Classification**: Automatically categorizes and analyzes messages
-- **Predictive State Recovery**: Predicts optimal recovery paths for connection failures
-- **Protocol Optimization**: Machine learning-based suggestion for operation parameters
-- **Anomaly Detection**: Identifies suspicious activities and security threats
-- **Resource Allocation**: Optimizes network and memory usage based on patterns
-
-## ⚡ AsyncIO Advantages
-
-- **Non-blocking operations** across all protocol layers
-- **True concurrent** multi-account handling
-- **Responsive CLI** with real-time feedback
-- **Efficient resource utilization** - minimal memory footprint
-- **Graceful error recovery** with async context management
-
-## 📦 Project Structure
-
-```
-zowsup-cli/
-├── app/                 # Main application layer (async)
-│   ├── ai_module/      # AI/ML integration
-│   ├── zowbot.py       # Core bot engine (async)
-│   └── zowbot_cmd/     # Command handlers
-├── core/               # Protocol layer (async)
-│   ├── layers/         # Protocol stack layers
-│   ├── stacks/         # Multi-device stacks
-│   └── registration/   # Account registration
-├── consonance/         # Noise protocol (async-native)
-├── axolotl/            # End-to-end encryption
-├── zargo/              # Argo data codec
-├── zwam/               # WAM encoding/decoding
-├── proto/              # Protobuf definitions
-├── script/             # CLI entry points
-├── conf/               # Configuration files
-└── common/             # Shared utilities
-```
-
-## 💬 Community & Support
-
-**Discussion & Support:**
-- Telegram: [Zowsup Community](https://t.me/+au1dTQz7jyU0YjU5)
-
-**Contribution:**
-- Report issues with detailed async logs
-- Submit enhancements via pull requests
-- Participate in protocol discussions
-
-## 🔄 Changelog
-
-### v0.8.0 (Latest release at 2026.04.23)
-- Full AsyncIO implementation across all layers
-- Enhanced prompt system with AI validation
-- Improved error messages and recovery
-- Multi-environment stability improvements
-
-
-## 🔒 Security Note
-
-This project handles sensitive WhatsApp protocol operations. Always:
-- Protect your account credentials
-- Use secure network connections
-- Keep the library updated for security patches
-- Never share account data with untrusted sources
-
-## 📝 License
-
-See [LICENSE](./LICENSE) file for details.
+|---|---|
+| `misc.checkactive` | Check if numbers are active |
+| `misc.bizfeatures` | Business account features |
+| `misc.bizintegrity` | Business account integrity |
+| `misc.prekeycount` | Prekey count on server |
+| `misc.reachouttimelock` | Reachout timelock |
+| `msgshortlink.get/decode/setmsg/reset` | Short link operations |
+| `newsletter.join/leave/metadata/…` | Newsletter operations |
 
 ---
 
-**Built for advanced WhatsApp interactions. Restructured for the modern async Python ecosystem.**
+## Web dashboard
+
+A web dashboard for monitoring messages, managing accounts, and configuring AI strategies.
+
+**Stack:** Flask 3 + Flask-SocketIO (backend) · React 18 + Vite + Ant Design v5 (frontend)
+
+### Directory layout
+
+```
+app/dashboard/
+├── api/          # Flask REST API blueprints
+├── strategy/     # AI strategy engine
+├── utils/        # bot_status, avatar_queue, db helpers
+├── bridge.py     # Integration point — called by bot core
+├── config.py     # Dashboard-specific config
+└── frontend/     # React + Vite frontend
+    ├── src/
+    ├── package.json
+    └── vite.config.ts
+```
+
+### Starting
+
+```bash
+# Backend + frontend together (recommended for development)
+python script/start_dashboard.py
+
+# Backend only (port 5000)
+python script/dashboard_server.py
+
+# Frontend dev server only (port 5173, proxies /api → 5000)
+cd app/dashboard/frontend
+npm install   # first time only
+npm run dev
+```
+
+The dashboard is gated by the `DASHBOARD_MODE` environment variable.  
+`script/dashboard_server.py` sets it automatically. Running `script/main.py` alone never writes to the dashboard DB.
+
+### Running an Agent
+
+An agent process runs on any machine where bot accounts are stored.
+
+```bash
+# Required environment variables
+export AGENT_ID=my-server-01          # unique name for this agent
+export AGENT_KEY_SECRET=<hex-secret>  # 64-char hex secret from the dashboard
+export BACKEND_URL=http://<server-ip>:5000
+
+# Optional
+export AGENT_PHONES=628111,628222     # comma-separated; auto-discovered if unset
+export BOT_DRIVER_MODE=agent          # agent | local | "" (default: try agent, fall back to local)
+
+python script/agent.py
+```
+
+Register an agent secret from the dashboard Agents panel, or via API:
+
+```bash
+curl -X POST http://<server>:5000/api/bot/agents \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id": "my-server-01", "note": "HK server"}'
+# Response includes the secret — shown once, store it immediately
+```
+
+#### `BOT_DRIVER_MODE` behaviour
+
+| Value | Behaviour |
+|---|---|
+| `"agent"` | All start/stop operations require a connected agent; returns HTTP 503 if none is available |
+| `"local"` | Always runs bots as local subprocesses on the server; ignores agents |
+| `""` (default) | Tries the agent first; falls back to local subprocess if no agent is connected |
+
+### Features
+
+- **Contact list** — avatars, unread badges, last-message preview, real-time updates
+- **Chat history** — per-contact conversation view with AI "thoughts" panel; translated messages show translated text first with original below
+- **Translation** — per-conversation toggle; auto-translates incoming messages via configurable provider; results persisted to DB
+- **Bot management** — account list, one-click start, live startup log stream, import/export 6-segment backups, failure marking and batch delete; accounts can be filtered by agent
+- **Agent management** — register agents, view online/offline status, connected phones, last heartbeat
+- **Strategy management** — global and per-user AI reply strategies, history table, one-click toggle/rollback
+- **Real-time push** — WebSocket (Socket.IO) + SSE; no polling
+
+### Bot management details
+
+| Action | How |
+|---|---|
+| Start a bot | Click **Start** on an account row; command is dispatched to the responsible agent (or run locally if no agent) |
+| Import accounts | Paste 6-segment strings → choose target Agent (or Local); `script/import6.py` runs on the selected machine |
+| Export accounts | Select rows → Export; `script/export6.py` output shown in a modal |
+| Mark / unmark failed | Manual toggle, or auto-set on permanent ban (403/401) |
+| Batch delete failed | One click removes all failure-marked account directories |
+| Filter by agent | Use the Agent dropdown above the table to show only accounts for a specific agent |
+
+### Agent alerts (real-time)
+
+The server emits `agent_alert` Socket.IO events to the frontend on:
+
+| Alert type | Trigger |
+|---|---|
+| `agent_offline` | Agent WebSocket disconnected |
+| `agent_heartbeat_overdue` | No heartbeat for > `AGENT_HEARTBEAT_OVERDUE` seconds (default 90 s) |
+| `command_timeout` | A command timed out on one attempt (retries remaining) |
+| `command_dead` | All retry attempts exhausted; job moved to dead-letter state |
+| `bot_start_failures` | N consecutive start failures for the same phone (default threshold: 3) |
+
+All dispatched commands are persisted in the `agent_command_jobs` SQLite table for audit and retry tracking.
+
+### Translation
+
+The dashboard includes a built-in message translation service. Configure it at **Settings → Translation**.
+
+**Providers** (tried in order when set to *Auto*):
+| Provider | Required config |
+|---|---|
+| LibreTranslate | `LIBRETRANSLATE_URL` (self-hosted or public instance) |
+| DeepL | `DEEPL_API_KEY` |
+| OpenAI / Compatible | `OPENAI_API_KEY`, optional `OPENAI_API_URL` + model |
+| GLM (Zhipu AI) | `GLM_API_KEY`, optional model (default `glm-4-flash`) |
+| Qwen (通义千问) | `QWEN_API_KEY`, optional model (default `qwen-turbo`) |
+
+**How it works:**
+1. Enable the toggle on any contact — the switch appears at the bottom-left of each contact row.
+2. Every new incoming text message is automatically translated using the configured provider.
+3. If the translated text differs from the original, the bubble shows the translation first and the original below as `原文：…`.
+4. Translation results are stored in the `translated_content` column of `chat_messages` in the SQLite database, so they survive page refreshes and are available for audit.
+5. Toggle state and target language are persisted in browser `localStorage`.
+
+Provider config is saved to `data/translation_config.json` (excluded from git). You can also set values via environment variables (`DEEPL_API_KEY`, `OPENAI_API_KEY`, `GLM_API_KEY`, `QWEN_API_KEY`, etc.).
+
+### Selected API endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/bot/accounts` | List accounts with live status and agent assignment |
+| `POST` | `/api/bot/import` | Import 6-segment strings (optional `agent_id` to import on a remote agent) |
+| `POST` | `/api/bot/export` | Export 6-segment strings |
+| `DELETE` | `/api/bot/accounts/<phone>` | Delete account directory |
+| `PATCH` | `/api/bot/accounts/<phone>/mark-failed` | Toggle failure mark |
+| `DELETE` | `/api/bot/accounts` | Batch-delete all failed accounts |
+| `GET` | `/api/bot/agents` | List registered agents with online status |
+| `POST` | `/api/bot/agents` | Register a new agent (returns one-time secret) |
+| `DELETE` | `/api/bot/agents/<id>` | Delete agent definition |
+| `POST` | `/api/bot/start` | Start a bot (routes to agent or local based on `BOT_DRIVER_MODE`) |
+| `POST` | `/api/bot/logout` | Stop / logout a bot |
+| `PATCH` | `/api/strategy/<id>/toggle` | Toggle strategy active state |
+| `DELETE` | `/api/strategy/<id>` | Delete strategy row |
+| `GET` | `/api/translation/config` | Get translation provider config |
+| `POST` | `/api/translation/config` | Save translation provider config |
+| `POST` | `/api/translation/translate` | Translate a piece of text |
+| `PATCH` | `/api/translation/message/<id>` | Persist translation result to DB |
+| `GET` | `/api/translation/settings/<jid>` | Get per-conversation translation settings |
+| `POST` | `/api/translation/settings/<jid>` | Save per-conversation translation settings |
+
+Full spec: `docs/openapi.yaml`
+
+---
+
+## Docker
+
+```bash
+# Copy and configure environment
+cp .env.example .env
+
+# Build and start (backend + nginx frontend)
+docker compose up --build -d
+```
+
+Services:
+- `backend` → http://localhost:5000
+- `frontend` (Nginx) → http://localhost:80
+
+---
+
+## Project structure
+
+```
+zowsup-cli/
+├── app/
+│   ├── ai_module/          # AI service, strategy, satisfaction plugin
+│   ├── dashboard/
+│   │   ├── api/            # Flask blueprints
+│   │   ├── strategy/       # Strategy engine
+│   │   ├── utils/          # DB, avatar queue, bot status helpers
+│   │   ├── bridge.py       # Bot ↔ dashboard integration facade
+│   │   └── frontend/       # React 18 + Vite dashboard UI
+│   ├── zowbot.py           # Bot engine
+│   └── zowbot_cmd/         # Command handler implementations
+├── core/                   # Protocol stack (async)
+├── consonance/             # Noise protocol handshake
+├── axolotl/                # Signal Protocol encryption
+├── script/
+│   ├── main.py             # Run a single bot (one phone number)
+│   ├── agent.py            # Agent process — manages local bots, connects to server
+│   ├── dashboard_server.py # Run the dashboard backend (Server tier)
+│   ├── start_dashboard.py  # Run backend + frontend together
+│   ├── regwithscan.py      # Register via QR scan
+│   ├── regwithlinkcode.py  # Register via link code
+│   ├── import6.py          # Import 6-segment account backup
+│   └── export6.py          # Export 6-segment account backup
+├── conf/                   # config.conf, constants, logging
+├── proto/                  # Protobuf definitions
+└── docs/                   # DEPLOY.md, OPERATIONS.md, openapi.yaml
+```
+
+---
+
+## Support
+
+- Telegram: [Zowsup Community](https://t.me/+au1dTQz7jyU0YjU5)
+
+## License
+
+See [LICENSE](./LICENSE).
 

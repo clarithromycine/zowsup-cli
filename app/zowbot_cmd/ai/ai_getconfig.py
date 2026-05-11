@@ -11,7 +11,7 @@ class Cmd_Ai_Getconfig(BotCommand):
     """Get backend configuration based on config.conf."""
     
     COMMAND = "ai.getconfig"
-    DESCRIPTION = "Get AI backend configuration (active or specific backend)"
+    DESCRIPTION = "Get AI backend configuration"
     
     async def execute(self, params, options):
         """
