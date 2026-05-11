@@ -185,6 +185,7 @@ python script/main.py [account-number] [command] [params...]
 
 #### Misc / Business
 | Command | Description |
+<<<<<<< HEAD
 |---|---|
 | `misc.checkactive` | Check if numbers are active |
 | `misc.bizfeatures` | Business account features |
@@ -193,6 +194,103 @@ python script/main.py [account-number] [command] [params...]
 | `misc.reachouttimelock` | Reachout timelock |
 | `msgshortlink.get/decode/setmsg/reset` | Short link operations |
 | `newsletter.join/leave/metadata/…` | Newsletter operations |
+=======
+|---------|-------------|
+| `misc.checkactive` | Validate phone numbers |
+| `misc.bizfeatures` | Check business account features |
+| `misc.bizintegrity` | Verify business account integrity |
+| `misc.prekeycount` | Query prekey count from server |
+| `misc.reachouttimelock` | Query reachout timelock |
+| `msgshortlink.get` | Get short link |
+| `msgshortlink.decode` | Decode short link info |
+| `msgshortlink.setmsg` | Set message in short link |
+| `msgshortlink.reset` | Reset short link |
+| `newsletter.join` | Join newsletter |
+| `newsletter.leave` | Leave newsletter |
+| `newsletter.metadata` | Get newsletter metadata |
+| `newsletter.recommended` | Get recommended newsletters |
+| `newsletter.directorylist` | List newsletter directory |
+| `newsletter.directorysearch` | Search newsletters |
+
+## 🌐 Proxy Configuration
+
+Enable proxy with dynamic session/location support:
+
+```bash
+python script/main.py [account-number] --proxy "host:port:username:password"
+```
+
+Supported dynamic replacements:
+- `{location}` - Current session location
+- `{session_id}` - Current session identifier
+
+## 🧠 AI Module Architecture
+
+The integrated AI module provides:
+
+- **Intelligent Message Classification**: Automatically categorizes and analyzes messages
+- **Predictive State Recovery**: Predicts optimal recovery paths for connection failures
+- **Protocol Optimization**: Machine learning-based suggestion for operation parameters
+- **Anomaly Detection**: Identifies suspicious activities and security threats
+- **Resource Allocation**: Optimizes network and memory usage based on patterns
+
+## ⚡ AsyncIO Advantages
+
+- **Non-blocking operations** across all protocol layers
+- **True concurrent** multi-account handling
+- **Responsive CLI** with real-time feedback
+- **Efficient resource utilization** - minimal memory footprint
+- **Graceful error recovery** with async context management
+
+## 📦 Core Project Structure
+
+```
+zowsup-cli/
+├── app/                 # Main application layer (async)
+│   ├── ai_module/      # AI/ML integration
+│   ├── zowbot.py       # Core bot engine (async)
+│   └── zowbot_cmd/     # Command handlers
+├── core/               # Protocol layer (async)
+│   ├── layers/         # Protocol stack layers
+│   ├── stacks/         # Multi-device stacks
+│   └── registration/   # Account registration
+├── proto/              # Protobuf definitions
+├── script/             # CLI entry points
+├── conf/               # Configuration files
+└── common/             # Shared utilities
+```
+
+## 💬 Community & Support
+
+**Discussion & Support:**
+- Telegram: [Zowsup Community](https://t.me/+au1dTQz7jyU0YjU5)
+
+**Contribution:**
+- Report issues with detailed async logs
+- Submit enhancements via pull requests
+- Participate in protocol discussions
+
+## 🔄 Changelog
+
+### v0.8.0 (Latest release at 2026.04.23)
+- Full AsyncIO implementation across all layers
+- Enhanced prompt system with AI validation
+- Improved error messages and recovery
+- Multi-environment stability improvements
+
+
+## 🔒 Security Note
+
+This project handles sensitive WhatsApp protocol operations. Always:
+- Protect your account credentials
+- Use secure network connections
+- Keep the library updated for security patches
+- Never share account data with untrusted sources
+
+## 📝 License
+
+See [LICENSE](./LICENSE) file for details.
+>>>>>>> 4a20dd98e76705f7cd3aa160adc35006ada96c99
 
 ---
 
