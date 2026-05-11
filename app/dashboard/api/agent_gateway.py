@@ -57,6 +57,12 @@ _sid_by_agent: dict[str, str] = {}
 _agent_by_phone: dict[str, str] = {}
 _registry_lock = threading.Lock()
 
+# ── Agent-reported bot statuses ────────────────────────────────────────────────
+# phone -> {"running": bool, "jid": str|None, "agent_id": str}
+# Updated from heartbeat and bot_status agent events.
+_agent_bot_status: dict[str, dict] = {}
+_bot_status_lock = threading.Lock()
+
 # ── Pending command table ───────────────────────────────────────────────────────
 # cmd_id -> {"event": threading.Event, "result": dict | None}
 _pending: dict[str, dict] = {}
@@ -129,6 +135,18 @@ def get_agent_for_phone(phone: str) -> Optional[str]:
     """Return agent_id that manages *phone*, or None."""
     with _registry_lock:
         return _agent_by_phone.get(phone.lstrip("+"))
+
+
+def get_agent_running_phones() -> set[str]:
+    """Return the set of phone numbers that agents currently report as running."""
+    with _bot_status_lock:
+        return {ph for ph, st in _agent_bot_status.items() if st.get("running")}
+
+
+def get_agent_phone_status(phone: str) -> Optional[dict]:
+    """Return the latest status dict for *phone* as reported by its agent."""
+    with _bot_status_lock:
+        return _agent_bot_status.get(phone.lstrip("+"))
 
 
 def get_all_agents() -> list[dict]:
@@ -235,6 +253,11 @@ def register_agent_namespace(sio) -> None:
                 for ph in info.get("phones", []):
                     if _agent_by_phone.get(ph) == aid:
                         _agent_by_phone.pop(ph, None)
+                # Mark all phones this agent managed as not running
+                with _bot_status_lock:
+                    for ph, st in list(_agent_bot_status.items()):
+                        if st.get("agent_id") == aid:
+                            _agent_bot_status[ph] = {**st, "running": False}
                 logger.info("Agent %s disconnected", aid)
                 sio.emit("agent_disconnected", {"agent_id": aid}, namespace="/")
 
@@ -281,7 +304,31 @@ def register_agent_namespace(sio) -> None:
         if ev_type == "bot_log":
             sio.emit("bot_log", {**payload, "source": "agent", "agent_id": agent_id}, namespace="/")
         elif ev_type == "bot_status":
+            # Single bot status update — store it
+            phone = str(payload.get("phone", "")).lstrip("+")
+            if phone:
+                with _bot_status_lock:
+                    _agent_bot_status[phone] = {
+                        "running": bool(payload.get("running")),
+                        "jid": payload.get("jid"),
+                        "agent_id": agent_id,
+                    }
             sio.emit("bot_status_changed", {**payload, "agent_id": agent_id}, namespace="/")
+        elif ev_type == "heartbeat":
+            # Bulk status from heartbeat
+            bots = payload.get("bots") or []
+            with _bot_status_lock:
+                for bot in bots:
+                    if not isinstance(bot, dict):
+                        continue
+                    phone = str(bot.get("phone", "")).lstrip("+")
+                    if phone:
+                        _agent_bot_status[phone] = {
+                            "running": bool(bot.get("running")),
+                            "jid": bot.get("jid"),
+                            "agent_id": agent_id,
+                        }
+            sio.emit(f"agent:{ev_type}", {**payload, "agent_id": agent_id}, namespace="/")
         else:
             sio.emit(f"agent:{ev_type}", {**payload, "agent_id": agent_id}, namespace="/")
 

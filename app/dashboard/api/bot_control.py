@@ -807,6 +807,16 @@ def list_accounts():
         if s.get("running") and s.get("pid") and _pid_alive(s["pid"])
     }
 
+    # Merge agent-reported running phones
+    try:
+        from app.dashboard.api.agent_gateway import get_agent_for_phone, get_agent_running_phones
+        agent_running = get_agent_running_phones()
+        running_phones |= agent_running
+        _has_agent_info = True
+    except Exception:
+        get_agent_for_phone = lambda _: None  # noqa: E731
+        _has_agent_info = False
+
     failed = _read_failed()
 
     accounts = []
@@ -841,6 +851,7 @@ def list_accounts():
                 "is_failed": (phone in failed),
                 "failed_at": failed.get(phone),
                 "last_seen": last_seen,
+                "agent_id": get_agent_for_phone(phone) if _has_agent_info else None,
             })
 
     # Sort by last_seen descending (most recently touched first)

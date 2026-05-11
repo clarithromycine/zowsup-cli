@@ -18,6 +18,7 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Select,
   Space,
   Spin,
   Table,
@@ -29,6 +30,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
+  ApartmentOutlined,
   CheckCircleOutlined,
   CloudDownloadOutlined,
   CloudUploadOutlined,
@@ -266,6 +268,17 @@ const AccountsSection: React.FC = () => {
   const [rowLoading, setRowLoading] = useState<Record<string, boolean>>({})
 
   const [searchQuery, setSearchQuery] = useState('')
+  const [agentFilter, setAgentFilter] = useState<string | null>(null)
+  // agent_id options derived from loaded accounts
+  const agentOptions = React.useMemo(() => {
+    const ids = new Set<string>()
+    accounts.forEach((a) => { if (a.agent_id) ids.add(a.agent_id) })
+    return [
+      { value: '__ALL__', label: '全部' },
+      { value: '__LOCAL__', label: 'LOCAL（本机）' },
+      ...[...ids].sort().map((id) => ({ value: id, label: id })),
+    ]
+  }, [accounts])
 
   // Import modal
   const [importOpen, setImportOpen] = useState(false)
@@ -308,8 +321,28 @@ const AccountsSection: React.FC = () => {
     setRowLoading((prev) => ({ ...prev, [phone]: busy }))
 
   // ── One-click start ──
-  const handleQuickStart = async (phone: string) => {
-    // Close any existing SSE for this specific phone only
+  const handleQuickStart = async (phone: string, agentId: string | null) => {
+    // For agent-managed bots, postBotStart already dispatches to the agent;
+    // skip the SSE wait (which is local-only) and just poll via load().
+    if (agentId) {
+      setRowBusy(phone, true)
+      try {
+        const res = await postBotStart(phone)
+        if (res.already_running) {
+          msgApi.info(`Bot ${phone} 已在运行中`)
+        } else if (res.ok) {
+          msgApi.success(`Bot ${phone} 启动指令已发送至 Agent`)
+        }
+        await load()
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        msgApi.error(msg)
+      } finally {
+        setRowBusy(phone, false)
+      }
+      return
+    }
+    // Local bot: close any existing SSE for this phone, then start with SSE wait.
     esRef.current.get(phone)?.close()
     esRef.current.delete(phone)
     setRowBusy(phone, true)
@@ -449,13 +482,28 @@ const AccountsSection: React.FC = () => {
     }
   }
 
-  const filteredAccounts = searchQuery.trim()
-    ? accounts.filter((a) => a.phone.includes(searchQuery.trim()))
-    : accounts
+  const filteredAccounts = accounts.filter((a) => {
+    if (searchQuery.trim() && !a.phone.includes(searchQuery.trim())) return false
+    if (agentFilter && agentFilter !== '__ALL__') {
+      if (agentFilter === '__LOCAL__') return !a.agent_id
+      return a.agent_id === agentFilter
+    }
+    return true
+  })
 
   const failedCount = accounts.filter((a) => a.is_failed).length
 
   const columns: ColumnsType<BotAccount> = [
+    {
+      title: 'Agent',
+      dataIndex: 'agent_id',
+      key: 'agent_id',
+      width: 140,
+      render: (agentId: string | null) =>
+        agentId
+          ? <Tag icon={<ApartmentOutlined />} color="blue" style={{ fontFamily: 'monospace', fontSize: 11 }}>{agentId}</Tag>
+          : <Tag color="default" style={{ fontSize: 11 }}>LOCAL</Tag>,
+    },
     {
       title: t('bot.phone'),
       dataIndex: 'phone',
@@ -508,7 +556,7 @@ const AccountsSection: React.FC = () => {
                 icon={<PlayCircleOutlined />}
                 disabled={record.is_failed}
                 loading={rowLoading[record.phone]}
-                onClick={() => handleQuickStart(record.phone)}
+                onClick={() => handleQuickStart(record.phone, record.agent_id)}
               >
                 {t('bot.start')}
               </Button>
@@ -587,15 +635,25 @@ const AccountsSection: React.FC = () => {
     >
       {contextHolder}
 
-      {/* Phone search */}
-      <Input
-        allowClear
-        prefix={<SearchOutlined />}
-        placeholder="搜索账号"
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        style={{ marginBottom: 12, maxWidth: 280 }}
-      />
+      {/* Search + Agent filter row */}
+      <Space style={{ marginBottom: 12 }} wrap>
+        <Input
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder="搜索账号"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{ width: 220 }}
+        />
+        <Select
+          style={{ width: 200 }}
+          placeholder="筛选 Agent"
+          value={agentFilter ?? '__ALL__'}
+          onChange={(v) => setAgentFilter(v === '__ALL__' ? null : v)}
+          options={agentOptions}
+          suffixIcon={<ApartmentOutlined />}
+        />
+      </Space>
 
       {/* Account status summary */}
       {accounts.length > 0 && (() => {

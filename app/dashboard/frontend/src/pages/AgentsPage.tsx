@@ -29,7 +29,6 @@ import {
   Space,
   Spin,
   Tag,
-  Tooltip,
   Typography,
   message,
 } from 'antd'
@@ -42,17 +41,13 @@ import {
   DisconnectOutlined,
   MinusCircleOutlined,
   PhoneOutlined,
-  PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
-  StopOutlined,
 } from '@ant-design/icons'
 import {
   fetchAgents,
   postAgent,
   deleteAgent,
-  postAgentStartBot,
-  postAgentStopBot,
 } from '../api/endpoints'
 import type { AgentInfo, AgentCreated } from '../api/endpoints'
 
@@ -70,91 +65,6 @@ function fmtUptime(seconds: number): string {
 
 function fmtTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString()
-}
-
-// ── Phone action row ──────────────────────────────────────────────────────────
-
-interface PhoneRowProps {
-  phone: string
-  onRefresh: () => void
-}
-
-const PhoneRow: React.FC<PhoneRowProps> = ({ phone, onRefresh }) => {
-  const [starting, setStarting] = useState(false)
-  const [stopping, setStopping] = useState(false)
-
-  const handleStart = async () => {
-    setStarting(true)
-    try {
-      const res = await postAgentStartBot(phone)
-      if (res.ok) {
-        message.success(`Bot ${phone} 已启动`)
-        onRefresh()
-      } else {
-        message.error(res.error ?? '启动失败')
-      }
-    } catch {
-      message.error('请求失败')
-    } finally {
-      setStarting(false)
-    }
-  }
-
-  const handleStop = async () => {
-    setStopping(true)
-    try {
-      const res = await postAgentStopBot(phone)
-      if (res.ok) {
-        message.success(`Bot ${phone} 已停止`)
-        onRefresh()
-      } else {
-        message.error(res.error ?? '停止失败')
-      }
-    } catch {
-      message.error('请求失败')
-    } finally {
-      setStopping(false)
-    }
-  }
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '5px 0',
-        borderBottom: '1px solid #f0f0f0',
-      }}
-    >
-      <PhoneOutlined style={{ color: '#1677ff' }} />
-      <Text style={{ flex: 1, fontFamily: 'monospace', fontSize: 13 }}>{phone}</Text>
-      <Tooltip title="启动 Bot">
-        <Button
-          size="small"
-          type="text"
-          icon={<PlayCircleOutlined style={{ color: '#52c41a' }} />}
-          loading={starting}
-          onClick={handleStart}
-        />
-      </Tooltip>
-      <Tooltip title="停止 Bot">
-        <Popconfirm
-          title={`停止 Bot ${phone}？`}
-          onConfirm={handleStop}
-          okText="停止"
-          cancelText="取消"
-        >
-          <Button
-            size="small"
-            type="text"
-            icon={<StopOutlined style={{ color: '#ff4d4f' }} />}
-            loading={stopping}
-          />
-        </Popconfirm>
-      </Tooltip>
-    </div>
-  )
 }
 
 // ── Agent card ────────────────────────────────────────────────────────────────
@@ -225,11 +135,15 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, onRefresh }) => {
           ) : (
             <>
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                管理的手机号（{agent.phones.length} 个）
+                管理的手机号（{agent.phones.length} 个）— 在「Bot 管理」页可启动/停止
               </Text>
-              {agent.phones.map((phone) => (
-                <PhoneRow key={phone} phone={phone} onRefresh={onRefresh} />
-              ))}
+              <Space wrap size={4}>
+                {agent.phones.map((phone) => (
+                  <Tag key={phone} icon={<PhoneOutlined />} color="blue" style={{ fontFamily: 'monospace' }}>
+                    {phone}
+                  </Tag>
+                ))}
+              </Space>
             </>
           )}
         </>

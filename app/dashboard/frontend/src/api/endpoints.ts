@@ -193,6 +193,7 @@ export interface BotAccount {
   is_failed: boolean
   failed_at: string | null
   last_seen: string | null
+  agent_id: string | null
 }
 
 export interface ImportResult {
