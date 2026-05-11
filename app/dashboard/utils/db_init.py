@@ -163,6 +163,59 @@ CREATE TABLE IF NOT EXISTS message_templates (
 """
 
 # ---------------------------------------------------------------------------
+# Agent infrastructure DDL (PLAN M1 DB tables)
+# ---------------------------------------------------------------------------
+
+_DDL_AGENTS = """
+CREATE TABLE IF NOT EXISTS agents (
+    agent_id     TEXT PRIMARY KEY,
+    note         TEXT    NOT NULL DEFAULT '',
+    status       TEXT    NOT NULL DEFAULT 'offline', -- 'online' / 'offline' / 'degraded'
+    last_seen_at INTEGER,
+    created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+    updated_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+"""
+
+_DDL_AGENT_KEYS = """
+CREATE TABLE IF NOT EXISTS agent_keys (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id   TEXT    NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+    key_hash   TEXT    NOT NULL,   -- SHA-256 hex of the raw HMAC secret (stored in agents.json)
+    is_active  INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+"""
+
+_DDL_BOT_INSTANCES = """
+CREATE TABLE IF NOT EXISTS bot_instances (
+    phone          TEXT PRIMARY KEY,
+    bot_jid        TEXT,
+    agent_id       TEXT REFERENCES agents(agent_id),
+    pid            INTEGER,
+    running        INTEGER NOT NULL DEFAULT 0 CHECK(running IN (0, 1)),
+    last_status_at INTEGER,
+    created_at     INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+"""
+
+_DDL_AGENT_COMMAND_JOBS = """
+CREATE TABLE IF NOT EXISTS agent_command_jobs (
+    job_id          TEXT PRIMARY KEY,            -- UUID
+    agent_id        TEXT    NOT NULL,
+    command_name    TEXT    NOT NULL,
+    request_payload TEXT    NOT NULL,            -- JSON
+    state           TEXT    NOT NULL DEFAULT 'queued'
+                            CHECK(state IN ('queued','sent','acked','succeeded','failed','timeout','dead')),
+    result_payload  TEXT,                        -- JSON
+    error           TEXT,
+    attempt         INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+);
+"""
+
+# ---------------------------------------------------------------------------
 # Indexes DDL
 # ---------------------------------------------------------------------------
 
@@ -183,6 +236,12 @@ _INDEXES = [
     # Phase 6: composite for unresolved conflicts per user
     "CREATE INDEX IF NOT EXISTS idx_conflicts_user_resolved ON strategy_conflicts(user_jid, resolved)",
     "CREATE INDEX IF NOT EXISTS idx_daily_date        ON daily_statistics(date)",
+    # Agent infrastructure indexes
+    "CREATE INDEX IF NOT EXISTS idx_agent_keys_agent  ON agent_keys(agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_bot_inst_agent    ON bot_instances(agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_cmd_jobs_agent    ON agent_command_jobs(agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_cmd_jobs_state    ON agent_command_jobs(state)",
+    "CREATE INDEX IF NOT EXISTS idx_cmd_jobs_created  ON agent_command_jobs(created_at DESC)",
 ]
 
 _ALL_DDL = [
@@ -195,6 +254,11 @@ _ALL_DDL = [
     _DDL_GROUP_MEMBERS,
     _DDL_MATERIALS,
     _DDL_MESSAGE_TEMPLATES,
+    # Agent infrastructure tables (PLAN M1 DB tables)
+    _DDL_AGENTS,
+    _DDL_AGENT_KEYS,
+    _DDL_BOT_INSTANCES,
+    _DDL_AGENT_COMMAND_JOBS,
 ] + _INDEXES
 
 
@@ -300,6 +364,38 @@ def _migrate_message_source(conn) -> None:
         logger.info("Migrated chat_messages: added source column")
 
 
+def _migrate_agent_tables(conn) -> None:
+    """Ensure agent infrastructure tables and their columns exist (idempotent).
+
+    For DBs created before the agent tables were added, _ALL_DDL will have
+    already created them above.  This helper handles the edge case where the
+    DB was created by an older version of init_db() that didn't include the
+    four agent tables — it explicitly runs the DDL statements so existing DBs
+    are upgraded on the next startup.
+    """
+    import time as _time
+    for ddl in (
+        _DDL_AGENTS,
+        _DDL_AGENT_KEYS,
+        _DDL_BOT_INSTANCES,
+        _DDL_AGENT_COMMAND_JOBS,
+    ):
+        conn.execute(ddl)
+
+    # Ensure agent infrastructure indexes exist (idempotent IF NOT EXISTS)
+    agent_indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_agent_keys_agent  ON agent_keys(agent_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bot_inst_agent    ON bot_instances(agent_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cmd_jobs_agent    ON agent_command_jobs(agent_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cmd_jobs_state    ON agent_command_jobs(state)",
+        "CREATE INDEX IF NOT EXISTS idx_cmd_jobs_created  ON agent_command_jobs(created_at DESC)",
+    ]
+    for idx in agent_indexes:
+        conn.execute(idx)
+
+    logger.debug("Agent infrastructure tables ensured")
+
+
 def init_db(db_path: str = DB_PATH) -> None:
     """
     Create tables, indexes, and enable WAL mode.
@@ -329,6 +425,7 @@ def init_db(db_path: str = DB_PATH) -> None:
         _migrate_group_members_participant_lid(conn)
         _migrate_translated_content(conn)
         _migrate_message_source(conn)
+        _migrate_agent_tables(conn)
         conn.commit()
         logger.info(f"Dashboard DB initialised at {db_path} (WAL mode)")
     except Exception:
@@ -376,6 +473,10 @@ def verify_db(db_path: str = DB_PATH) -> dict:
         "strategy_applications",
         "strategy_conflicts",
         "daily_statistics",
+        "agents",
+        "agent_keys",
+        "bot_instances",
+        "agent_command_jobs",
     ]
     result: dict = {"journal_mode": None, "tables": {}}
 

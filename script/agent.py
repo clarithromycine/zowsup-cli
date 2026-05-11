@@ -520,7 +520,9 @@ def main() -> None:
                 transports=["websocket"],
                 wait_timeout=10,
             )
-            sio.wait()
+            # Poll instead of sio.wait() so Ctrl+C / SIGTERM can interrupt promptly.
+            while not _stop.is_set() and sio.connected:
+                time.sleep(0.5)
         except sio_lib.exceptions.ConnectionError as exc:
             logger.warning("Connection failed: %s — retry in 5 s", exc)
         except Exception as exc:

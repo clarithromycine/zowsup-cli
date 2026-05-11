@@ -41,6 +41,18 @@ logger = logging.getLogger(__name__)
 
 bot_bp = Blueprint("bot", __name__)
 
+# ---------------------------------------------------------------------------
+# BOT_DRIVER_MODE
+# ---------------------------------------------------------------------------
+# Controls how start/stop/status commands are dispatched.
+#
+#   "agent"  — always route to a connected agent; return 503 if no agent found
+#   "local"  — always run as a local subprocess; never try agent
+#   ""       — (default) try agent first, fall back to local if no agent manages
+#              the phone  (backwards-compatible behaviour)
+#
+_BOT_DRIVER_MODE: str = os.environ.get("BOT_DRIVER_MODE", "").strip().lower()
+
 
 # ---------------------------------------------------------------------------
 # Agent routing helper
@@ -48,16 +60,26 @@ bot_bp = Blueprint("bot", __name__)
 
 def _try_agent_command(phone: str, cmd_type: str, payload: dict) -> "dict | None":
     """
-    If a connected agent manages *phone*, dispatch the command to it and
-    return the ack dict.  Returns None if no agent or timeout.
+    Dispatch *cmd_type* to the agent that manages *phone*.
+
+    Behaviour depends on BOT_DRIVER_MODE:
+    - "local"  → always return None (never use agent)
+    - "agent"  → always attempt; raises RuntimeError when no agent is found
+    - ""       → attempt if an agent manages the phone, else return None
     """
+    if _BOT_DRIVER_MODE == "local":
+        return None
     try:
         from app.dashboard.api.agent_gateway import get_agent_for_phone, dispatch_command
         agent_id = get_agent_for_phone(phone)
         if agent_id is None:
+            if _BOT_DRIVER_MODE == "agent":
+                raise RuntimeError(f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}")
             return None
         result = dispatch_command(agent_id, cmd_type, payload)
         return result
+    except RuntimeError:
+        raise
     except Exception as exc:
         logger.warning("Agent command %s failed for %s: %s", cmd_type, phone, exc)
         return None
@@ -499,9 +521,14 @@ def post_logout():
     phone = str(body.get("phone", "")).strip().lstrip("+") or None
     # Try agent first
     if phone:
-        agent_result = _try_agent_command(phone, "stop_bot", {"phone": phone})
+        try:
+            agent_result = _try_agent_command(phone, "stop_bot", {"phone": phone})
+        except RuntimeError as exc:
+            return {"error": str(exc)}, 503
         if agent_result is not None:
             return agent_result
+        if _BOT_DRIVER_MODE == "agent":
+            return {"error": f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}"}, 503
     status = read_status(phone=phone)
     pid = status.get("pid")
     if not status.get("running") or not pid:
@@ -548,9 +575,16 @@ def post_bot_start():
         return {"error": "invalid phone number — digits only, 7-15 characters"}, 400
 
     # Try agent first (agent manages bots on its own machine)
-    agent_result = _try_agent_command(phone, "start_bot", {"phone": phone})
+    try:
+        agent_result = _try_agent_command(phone, "start_bot", {"phone": phone})
+    except RuntimeError as exc:
+        return {"error": str(exc)}, 503
     if agent_result is not None:
         return agent_result
+
+    # If mode=agent we should never reach here, but guard anyway
+    if _BOT_DRIVER_MODE == "agent":
+        return {"error": f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}"}, 503
 
     # Fall back to local subprocess
     # Refuse to double-start the same phone
