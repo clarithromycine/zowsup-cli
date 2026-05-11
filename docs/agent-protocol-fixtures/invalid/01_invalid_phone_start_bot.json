@@ -1,0 +1,13 @@
+{
+  "msg_id": "9d0f2c8e-e4cd-4db5-b584-b19be6ef22db",
+  "protocol_version": "1.0",
+  "type": "command",
+  "name": "start_bot",
+  "agent_id": "agent-cn-sh01",
+  "timestamp": 1778445602,
+  "session_token": "sess_123456789",
+  "payload": {
+    "phone": "abc8613",
+    "boot_mode": "normal"
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "window_seconds": 300,
+  "keys": {
+    "agent-cn-sh01-key-202605": {
+      "secret": "k_1234567890abcdefghijklmnopqrstuvwxyz_1234567890",
+      "revoked": false,
+      "expires_at": 1778450000
+    },
+    "agent-cn-sh01-key-revoked": {
+      "secret": "k_revoked_1234567890abcdefghijklmnopqrstuvwxyz",
+      "revoked": true,
+      "expires_at": 1778450000
+    }
+  },
+  "cases": [
+    {
+      "id": "accept_valid_signature",
+      "now": 1778445610,
+      "expect": "ACCEPT",
+      "reason": "valid signed message",
+      "message": {
+        "msg_id": "f2c6a9f4-6ea8-4bca-8d85-266f3f6f13d1",
+        "protocol_version": "1.0",
+        "type": "event",
+        "name": "bot_log",
+        "agent_id": "agent-cn-sh01",
+        "timestamp": 1778445605,
+        "session_token": "sess_123456789",
+        "trace_id": "4c7fa804-a8b8-4f28-94c2-d7be0f6c8dc7",
+        "payload": {
+          "phone": "8613800138000",
+          "level": "INFO",
+          "logger": "zowbot",
+          "message": "Connected",
+          "ts": "2026-05-11 15:05:01",
+          "seq": 10231,
+          "dropped_count": 0
+        },
+        "security": {
+          "kid": "agent-cn-sh01-key-202605",
+          "alg": "hmac-sha256",
+          "nonce": "Q9R2m3c1_Nxq8W0a",
+          "signed_at": 1778445605,
+          "signature": "56oqes8bZRFi-oUnmhuutfZOY4owirRyZObURRW9r8w"
+        }
+      }
+    },
+    {
+      "id": "reject_bad_signature",
+      "now": 1778445610,
+      "expect": "REJECT",
+      "reject_code": "signature_invalid",
+      "reason": "signature tampered",
+      "message": {
+        "msg_id": "f2c6a9f4-6ea8-4bca-8d85-266f3f6f13d1",
+        "protocol_version": "1.0",
+        "type": "event",
+        "name": "bot_log",
+        "agent_id": "agent-cn-sh01",
+        "timestamp": 1778445605,
+        "payload": {
+          "phone": "8613800138000",
+          "level": "INFO",
+          "message": "Connected",
+          "ts": "2026-05-11 15:05:01",
+          "seq": 10231
+        },
+        "security": {
+          "kid": "agent-cn-sh01-key-202605",
+          "alg": "hmac-sha256",
+          "nonce": "Q9R2m3c1_Nxq8W0x",
+          "signed_at": 1778445605,
+          "signature": "invalidsignature"
+        }
+      }
+    },
+    {
+      "id": "reject_key_revoked",
+      "now": 1778445610,
+      "expect": "REJECT",
+      "reject_code": "key_revoked",
+      "reason": "kid is revoked",
+      "message": {
+        "msg_id": "23cb58eb-d023-4059-a6dc-1baf983e249a",
+        "protocol_version": "1.0",
+        "type": "event",
+        "name": "bot_log",
+        "agent_id": "agent-cn-sh01",
+        "timestamp": 1778445605,
+        "payload": {},
+        "security": {
+          "kid": "agent-cn-sh01-key-revoked",
+          "alg": "hmac-sha256",
+          "nonce": "Q9R2m3c1_Nxq8W0y",
+          "signed_at": 1778445605,
+          "signature": "abc"
+        }
+      }
+    },
+    {
+      "id": "reject_out_of_window",
+      "now": 1778447000,
+      "expect": "REJECT",
+      "reject_code": "signed_at_out_of_window",
+      "reason": "signed_at too old",
+      "message": {
+        "msg_id": "53538c8f-42db-4a87-94df-ff380ddc05ba",
+        "protocol_version": "1.0",
+        "type": "event",
+        "name": "bot_log",
+        "agent_id": "agent-cn-sh01",
+        "timestamp": 1778445605,
+        "payload": {},
+        "security": {
+          "kid": "agent-cn-sh01-key-202605",
+          "alg": "hmac-sha256",
+          "nonce": "Q9R2m3c1_Nxq8W0z",
+          "signed_at": 1778445605,
+          "signature": "abc"
+        }
+      }
+    },
+    {
+      "id": "reject_kid_not_found",
+      "now": 1778445610,
+      "expect": "REJECT",
+      "reject_code": "key_not_found",
+      "reason": "kid missing in key store",
+      "message": {
+        "msg_id": "8fdb3af7-357c-43bb-a7f1-f8e44a31f95c",
+        "protocol_version": "1.0",
+        "type": "event",
+        "name": "bot_log",
+        "agent_id": "agent-cn-sh01",
+        "timestamp": 1778445605,
+        "payload": {},
+        "security": {
+          "kid": "unknown-key-id",
+          "alg": "hmac-sha256",
+          "nonce": "Q9R2m3c1_Nxq8W01",
+          "signed_at": 1778445605,
+          "signature": "abc"
+        }
+      }
+    }
+  ]
+}

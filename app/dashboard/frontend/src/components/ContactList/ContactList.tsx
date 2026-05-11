@@ -160,14 +160,42 @@ const ContactList: React.FC = () => {
             >
               <List.Item.Meta
                 avatar={
-                  <Badge count={contact.unread} size="small">
-                    <Avatar
-                      src={contact.avatar_url ?? undefined}
-                      icon={isGroup(contact.jid) ? <TeamOutlined /> : <UserOutlined />}
-                      size={36}
-                      style={isGroup(contact.jid) ? { backgroundColor: '#722ed1' } : undefined}
-                    />
-                  </Badge>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 42, gap: 6 }}>
+                    <Badge count={contact.unread} size="small">
+                      <Avatar
+                        src={contact.avatar_url ?? undefined}
+                        icon={isGroup(contact.jid) ? <TeamOutlined /> : <UserOutlined />}
+                        size={36}
+                        style={isGroup(contact.jid) ? { backgroundColor: '#722ed1' } : undefined}
+                      />
+                    </Badge>
+
+                    <Tooltip
+                      title={
+                        translationEnabled[contact.jid]
+                          ? t('translate.disableFor')
+                          : t('translate.enableFor')
+                      }
+                    >
+                      <Space
+                        size={3}
+                        style={{ cursor: 'default' }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <TranslationOutlined
+                          style={{
+                            fontSize: 11,
+                            color: translationEnabled[contact.jid] ? '#1890ff' : '#d9d9d9',
+                          }}
+                        />
+                        <Switch
+                          size="small"
+                          checked={!!translationEnabled[contact.jid]}
+                          onChange={() => toggleTranslation(contact.jid)}
+                        />
+                      </Space>
+                    </Tooltip>
+                  </div>
                 }
                 title={
                   <span style={{ display: 'flex', alignItems: 'baseline', gap: 4, flexWrap: 'wrap' }}>
@@ -186,35 +214,7 @@ const ContactList: React.FC = () => {
                     <Text type="secondary" ellipsis style={{ fontSize: 12 }}>
                       {contact.last_message ?? '—'}
                     </Text>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      {/* Translation toggle — bottom-left */}
-                      <Tooltip
-                        title={
-                          translationEnabled[contact.jid]
-                            ? t('translate.disableFor')
-                            : t('translate.enableFor')
-                        }
-                      >
-                        <Space
-                          size={3}
-                          style={{ cursor: 'default' }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <TranslationOutlined
-                            style={{
-                              fontSize: 11,
-                              color: translationEnabled[contact.jid] ? '#1890ff' : '#d9d9d9',
-                            }}
-                          />
-                          <Switch
-                            size="small"
-                            checked={!!translationEnabled[contact.jid]}
-                            onChange={() => toggleTranslation(contact.jid)}
-                          />
-                        </Space>
-                      </Tooltip>
-
-                      {/* Bot tag + timestamp — bottom-right */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', minHeight: 22 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         {contact.bot_jid && (
                           <Tooltip title={contact.bot_jid}>

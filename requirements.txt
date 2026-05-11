@@ -31,6 +31,7 @@ flask-cors>=4.0.0
 apscheduler>=3.10.0
 flask-socketio>=5.3.6
 flask-limiter>=3.5.0
+websocket-client>=1.6.0    # required by python-socketio client (script/agent.py)
 
 # ===== Terminal & Prompt =====
 prompt_toolkit>=3.0

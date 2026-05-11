@@ -26,8 +26,11 @@ subprocess launched from the dashboard):
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import os
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -48,7 +51,6 @@ class _NoDashboard:
         def _noop(*args, **kwargs):  # noqa: ANN002, ANN003
             return None
         return _noop
-
 
 # ---------------------------------------------------------------------------
 # Live implementation (dashboard mode)
@@ -159,9 +161,147 @@ class _Dashboard:
             logger.debug("bridge.get_strategy_manager failed: %s", exc)
             return None
 
+    # ── Chat messages ─────────────────────────────────────────────────────
+
+    def save_chat_message(
+        self,
+        *,
+        bot_jid: str,
+        user_jid: str,
+        direction: str,
+        content: str,
+        message_type: str = "text",
+        participant: Optional[str] = None,
+        notify: Optional[str] = None,
+        media_path: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> None:
+        """Write a chat message row to dashboard.db (local mode)."""
+        if not self.db_path or not content:
+            return
+        try:
+            import sqlite3 as _sqlite3
+            conn = _sqlite3.connect(self.db_path, timeout=5)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute(
+                    "INSERT INTO chat_messages "
+                    "(user_jid, direction, content, message_type, timestamp, bot_jid, participant, notify, media_path, source) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (user_jid, direction, content, message_type, int(time.time()), bot_jid, participant, notify, media_path, source),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.warning("bridge.save_chat_message failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Agent bridge  (AGENT_MODE=1 — bot subprocess on remote agent machine)
+# ---------------------------------------------------------------------------
+
+class _AgentBridge:
+    """
+    Used when AGENT_MODE=1.  Forwards message data to the backend server
+    via HTTP POST instead of writing to a local SQLite database.
+
+    Authentication
+    ──────────────
+    Each request carries an X-Agent-Auth header:
+        <agent_id>:<signed_at>:<HMAC-SHA256(agent_id:signed_at, secret)>
+    Same scheme as the WebSocket connect auth.
+    """
+
+    db_path: Optional[str] = None  # no local DB in agent mode
+
+    def __init__(self) -> None:
+        self._agent_id = os.environ.get("AGENT_ID", "")
+        raw_secret = os.environ.get("AGENT_KEY_SECRET", "")
+        self._secret: bytes = (
+            bytes.fromhex(raw_secret) if len(raw_secret) == 64 else raw_secret.encode()
+        )
+        self._backend_url = os.environ.get("AGENT_BACKEND_URL", "").rstrip("/")
+        if not self._agent_id or not self._secret or not self._backend_url:
+            logger.warning(
+                "AgentBridge: AGENT_ID / AGENT_KEY_SECRET / AGENT_BACKEND_URL not fully set; "
+                "message forwarding disabled"
+            )
+            self._enabled = False
+        else:
+            self._enabled = True
+
+    def _auth_header(self) -> str:
+        signed_at = int(time.time())
+        sig = hmac.new(
+            self._secret,
+            f"{self._agent_id}:{signed_at}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        return f"{self._agent_id}:{signed_at}:{sig}"
+
+    def save_chat_message(
+        self,
+        *,
+        bot_jid: str,
+        user_jid: str,
+        direction: str,
+        content: str,
+        message_type: str = "text",
+        participant: Optional[str] = None,
+        notify: Optional[str] = None,
+        media_path: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> None:
+        """Forward a chat message to the backend ingest endpoint."""
+        if not self._enabled or not content:
+            return
+        try:
+            import urllib.request
+            import json as _json
+            body = _json.dumps({
+                "bot_jid": bot_jid,
+                "user_jid": user_jid,
+                "direction": direction,
+                "content": content,
+                "message_type": message_type,
+                "participant": participant,
+                "notify": notify,
+                "media_path": media_path,
+                "source": source,
+                "timestamp": int(time.time()),
+            }).encode()
+            req = urllib.request.Request(
+                f"{self._backend_url}/api/bot/ingest",
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Agent-Auth": self._auth_header(),
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status not in (200, 201):
+                    logger.debug("AgentBridge ingest status %s", resp.status)
+        except Exception as exc:
+            logger.debug("AgentBridge.save_chat_message failed: %s", exc)
+
+    # All other bridge calls are no-ops in agent mode
+    def __getattr__(self, name: str):  # noqa: ANN204
+        def _noop(*args, **kwargs):  # noqa: ANN002, ANN003
+            return None
+        return _noop
+
 
 # ---------------------------------------------------------------------------
 # Public singleton — import and use this
 # ---------------------------------------------------------------------------
 
-dashboard: "_Dashboard | _NoDashboard" = _Dashboard() if _ENABLED else _NoDashboard()
+_AGENT_MODE: bool = bool(os.environ.get("AGENT_MODE"))
+
+if _AGENT_MODE:
+    dashboard: "_Dashboard | _NoDashboard | _AgentBridge" = _AgentBridge()
+elif _ENABLED:
+    dashboard = _Dashboard()
+else:
+    dashboard = _NoDashboard()

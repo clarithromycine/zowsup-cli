@@ -10,6 +10,7 @@ import {
   FileTextOutlined,
   PictureOutlined,
   TranslationOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -70,6 +71,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       icon: <TranslationOutlined />,
       label: t('nav.translate'),
     },
+    {
+      key: '/agents',
+      icon: <ApartmentOutlined />,
+      label: t('nav.agents'),
+    },
   ]
 
   const isZh = i18n.language.startsWith('zh')
@@ -86,13 +92,13 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       >
         <div
           style={{
-            height: 48,
+            height: 64,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             userSelect: 'none',
             overflow: 'hidden',
-            padding: '0 8px',
+            padding: '6px 10px',
           }}
         >
           {collapsed ? (
@@ -100,7 +106,11 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               ZS
             </span>
           ) : (
-            <img src={logoSrc} alt="ZOWSUP" style={{ height: 34, objectFit: 'contain' }} />
+            <img
+              src={logoSrc}
+              alt="ZOWSUP"
+              style={{ height: 44, maxWidth: '100%', objectFit: 'contain' }}
+            />
           )}
         </div>
         <Menu

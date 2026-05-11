@@ -71,6 +71,9 @@ def create_app(db_path: str | None = None) -> Flask:
     _sio = init_socketio(app)
     if _sio is not None:
         start_monitor_thread(resolved_db_path)
+        # Register /agent namespace for remote agent connections
+        from app.dashboard.api.agent_gateway import register_agent_namespace
+        register_agent_namespace(_sio)
     # Expose SocketIO on app for run_dashboard.py to call socketio.run()
     app.extensions["socketio"] = _sio
 

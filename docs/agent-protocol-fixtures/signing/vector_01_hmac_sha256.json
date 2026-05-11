@@ -1,0 +1,33 @@
+{
+  "id": "vector_01_hmac_sha256",
+  "description": "Envelope canonicalization + HMAC-SHA256 base64url(no padding)",
+  "algorithm": "hmac-sha256",
+  "key": "k_1234567890abcdefghijklmnopqrstuvwxyz_1234567890",
+  "message": {
+    "msg_id": "f2c6a9f4-6ea8-4bca-8d85-266f3f6f13d1",
+    "protocol_version": "1.0",
+    "type": "event",
+    "name": "bot_log",
+    "agent_id": "agent-cn-sh01",
+    "timestamp": 1778445605,
+    "session_token": "sess_123456789",
+    "trace_id": "4c7fa804-a8b8-4f28-94c2-d7be0f6c8dc7",
+    "payload": {
+      "phone": "8613800138000",
+      "level": "INFO",
+      "logger": "zowbot",
+      "message": "Connected",
+      "ts": "2026-05-11 15:05:01",
+      "seq": 10231,
+      "dropped_count": 0
+    },
+    "security": {
+      "kid": "agent-cn-sh01-key-202605",
+      "alg": "hmac-sha256",
+      "nonce": "Q9R2m3c1_Nxq8W0a",
+      "signed_at": 1778445605
+    }
+  },
+  "canonical_json": "{\"agent_id\":\"agent-cn-sh01\",\"msg_id\":\"f2c6a9f4-6ea8-4bca-8d85-266f3f6f13d1\",\"name\":\"bot_log\",\"payload\":{\"dropped_count\":0,\"level\":\"INFO\",\"logger\":\"zowbot\",\"message\":\"Connected\",\"phone\":\"8613800138000\",\"seq\":10231,\"ts\":\"2026-05-11 15:05:01\"},\"protocol_version\":\"1.0\",\"security\":{\"alg\":\"hmac-sha256\",\"kid\":\"agent-cn-sh01-key-202605\",\"nonce\":\"Q9R2m3c1_Nxq8W0a\",\"signed_at\":1778445605},\"session_token\":\"sess_123456789\",\"timestamp\":1778445605,\"trace_id\":\"4c7fa804-a8b8-4f28-94c2-d7be0f6c8dc7\",\"type\":\"event\"}",
+  "expected_signature": "56oqes8bZRFi-oUnmhuutfZOY4owirRyZObURRW9r8w"
+}

@@ -260,3 +260,58 @@ export async function sendMessage(params: SendMessageParams): Promise<{ ok: bool
   const { data } = await apiClient.post('/send-message', params)
   return data
 }
+
+// ---- Agent Management ----
+
+/**
+ * An agent is defined on the server (via POST /api/bot/agents).
+ * `online` reflects whether the agent process is currently connected.
+ */
+export interface AgentInfo {
+  agent_id: string
+  note: string
+  created_at: number | null
+  online: boolean
+  phones: string[]
+  connected_at: number | null
+  uptime_seconds: number | null
+}
+
+export interface AgentCreated {
+  agent_id: string
+  note: string
+  secret: string
+  launch_cmd: string
+}
+
+export async function fetchAgents(): Promise<{ agents: AgentInfo[] }> {
+  const { data } = await apiClient.get('/bot/agents')
+  return data
+}
+
+export async function postAgent(
+  agent_id: string,
+  note: string,
+): Promise<AgentCreated> {
+  const { data } = await apiClient.post('/bot/agents', { agent_id, note })
+  return data
+}
+
+export async function deleteAgent(agent_id: string): Promise<{ ok: boolean }> {
+  const { data } = await apiClient.delete(`/bot/agents/${encodeURIComponent(agent_id)}`)
+  return data
+}
+
+export async function postAgentStartBot(
+  phone: string,
+): Promise<{ ok: boolean; pid?: number; error?: string }> {
+  const { data } = await apiClient.post('/bot/start', { phone })
+  return data
+}
+
+export async function postAgentStopBot(
+  phone: string,
+): Promise<{ ok: boolean; pid?: number; error?: string }> {
+  const { data } = await apiClient.post('/bot/logout', { phone })
+  return data
+}

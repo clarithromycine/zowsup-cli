@@ -35,7 +35,8 @@
     "gui":"GUI",
     "botLogs": "Live Logs",
     "materials": "AI Materials",
-    "translate": "Smart Translate"
+    "translate": "Smart Translate",
+    "agents": "Agents"
   },
   "header": {
     "botOnline": "Bot online",

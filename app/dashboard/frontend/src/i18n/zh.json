@@ -35,7 +35,8 @@
     "gui":"可视化界面",
     "botLogs": "实时日志",
     "materials": "AI素材库",
-    "translate": "智能翻译"
+    "translate": "智能翻译",
+    "agents": "Agent 管理"
   },
   "header": {
     "botOnline": "Bot 在线",

@@ -22,6 +22,8 @@ Design constraints
 
 import json
 import logging
+import hashlib
+import hmac
 import os
 import signal
 import subprocess
@@ -29,7 +31,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-
 from flask import Blueprint, Response, current_app, request, stream_with_context
 
 from app.dashboard.api.auth import check_bearer
@@ -39,6 +40,27 @@ from app.dashboard.utils.bot_status import read_status, read_all_statuses, _pid_
 logger = logging.getLogger(__name__)
 
 bot_bp = Blueprint("bot", __name__)
+
+
+# ---------------------------------------------------------------------------
+# Agent routing helper
+# ---------------------------------------------------------------------------
+
+def _try_agent_command(phone: str, cmd_type: str, payload: dict) -> "dict | None":
+    """
+    If a connected agent manages *phone*, dispatch the command to it and
+    return the ack dict.  Returns None if no agent or timeout.
+    """
+    try:
+        from app.dashboard.api.agent_gateway import get_agent_for_phone, dispatch_command
+        agent_id = get_agent_for_phone(phone)
+        if agent_id is None:
+            return None
+        result = dispatch_command(agent_id, cmd_type, payload)
+        return result
+    except Exception as exc:
+        logger.warning("Agent command %s failed for %s: %s", cmd_type, phone, exc)
+        return None
 
 # Path to the running QR subprocess, held in memory.
 # Single-instance assumption: only one scan session at a time.
@@ -68,10 +90,210 @@ def _bot_auth():
 # B.1  GET /api/bot/status
 # ---------------------------------------------------------------------------
 
+@bot_bp.get("/agents")
+def get_agents():
+    """
+    Return all *defined* agents merged with their current runtime state.
+    An agent is online when it has an active WebSocket connection.
+    """
+    from app.dashboard.api.agent_gateway import get_all_agents
+    from app.dashboard.utils.agents_store import list_agents
+
+    defined = {a["agent_id"]: a for a in list_agents()}
+    online = {a["agent_id"]: a for a in get_all_agents()}
+
+    merged = []
+    # defined agents first (ordered by creation time)
+    for agent_id, defn in sorted(defined.items(), key=lambda x: x[1].get("created_at") or 0):
+        rt = online.get(agent_id)
+        merged.append({
+            "agent_id": agent_id,
+            "note": defn.get("note", ""),
+            "created_at": defn.get("created_at"),
+            "online": rt is not None,
+            "phones": rt["phones"] if rt else [],
+            "connected_at": rt.get("connected_at") if rt else None,
+            "uptime_seconds": rt.get("uptime_seconds") if rt else None,
+        })
+    # online but not yet defined (edge case — env-var auth)
+    for agent_id, rt in online.items():
+        if agent_id not in defined:
+            merged.append({
+                "agent_id": agent_id,
+                "note": "",
+                "created_at": None,
+                "online": True,
+                "phones": rt["phones"],
+                "connected_at": rt.get("connected_at"),
+                "uptime_seconds": rt.get("uptime_seconds"),
+            })
+    return {"agents": merged}
+
+
+# ---------------------------------------------------------------------------
+# Agent definition CRUD  POST/DELETE /api/bot/agents
+# ---------------------------------------------------------------------------
+
+@bot_bp.post("/agents")
+@limiter.limit("20 per minute")
+def post_agent():
+    """
+    Define a new agent on the server.
+    Body: {"agent_id": "server-hk-01", "note": "optional label"}
+    Response (201): {"agent_id": ..., "secret": "<hex — shown once>", "launch_cmd": "..."}
+    """
+    from app.dashboard.utils.agents_store import add_agent
+    body = request.get_json(silent=True) or {}
+    agent_id = str(body.get("agent_id", "")).strip()
+    note = str(body.get("note", "")).strip()
+    if not agent_id:
+        return {"error": "agent_id required"}, 400
+    if not agent_id.replace("-", "").replace("_", "").isalnum():
+        return {"error": "agent_id must be alphanumeric (hyphens/underscores allowed)"}, 400
+    try:
+        secret_hex = add_agent(agent_id, note)
+    except ValueError as exc:
+        return {"error": str(exc)}, 409
+    backend_url = request.host_url.rstrip("/")
+    launch_cmd = (
+        f"AGENT_ID={agent_id} "
+        f"AGENT_KEY_SECRET={secret_hex} "
+        f"BACKEND_URL={backend_url} "
+        f"python script/agent.py"
+    )
+    return {
+        "agent_id": agent_id,
+        "note": note,
+        "secret": secret_hex,
+        "launch_cmd": launch_cmd,
+    }, 201
+
+
+@bot_bp.delete("/agents/<agent_id>")
+@limiter.limit("20 per minute")
+def delete_agent_def(agent_id: str):
+    """
+    Delete an agent definition.
+    The agent will be rejected on its next reconnect attempt.
+    """
+    from app.dashboard.utils.agents_store import delete_agent
+    deleted = delete_agent(agent_id)
+    if not deleted:
+        return {"error": f"Agent '{agent_id}' not defined"}, 404
+    return {"ok": True, "agent_id": agent_id}
+
+
+# ---------------------------------------------------------------------------
+# Agent ingest — B.1b  POST /api/bot/ingest
+# ---------------------------------------------------------------------------
+
+_INGEST_AUTH_WINDOW = 120  # seconds
+
+
+def _verify_ingest_auth(header_value: str) -> bool:
+    """
+    Verify the X-Agent-Auth header sent by agent-mode bot subprocesses.
+    Format: <agent_id>:<signed_at>:<hex_sig>
+    """
+    try:
+        agent_id, signed_at_str, sig = header_value.split(":", 2)
+        signed_at = int(signed_at_str)
+    except (ValueError, AttributeError):
+        return False
+    if abs(time.time() - signed_at) > _INGEST_AUTH_WINDOW:
+        return False
+    try:
+        from app.dashboard.utils.agents_store import get_agent_secret
+        secret = get_agent_secret(agent_id)
+        if secret is None:
+            return False
+        expected = hmac.new(secret, f"{agent_id}:{signed_at}".encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, sig)
+    except Exception:
+        return False
+
+
+@bot_bp.post("/ingest")
+def ingest_message():
+    """
+    Receive a chat message forwarded from an agent-mode bot subprocess and
+    persist it to dashboard.db.  Authenticated via X-Agent-Auth header
+    (same HMAC scheme as the WebSocket /agent namespace).
+
+    Body JSON fields:
+      bot_jid, user_jid, direction, content, message_type,
+      participant, notify, media_path, source, timestamp (optional)
+    """
+    auth_header = request.headers.get("X-Agent-Auth", "")
+    if not _verify_ingest_auth(auth_header):
+        return {"error": "unauthorized"}, 401
+
+    body = request.get_json(silent=True) or {}
+    bot_jid = body.get("bot_jid") or ""
+    user_jid = body.get("user_jid") or ""
+    direction = body.get("direction") or "in"
+    content = body.get("content") or ""
+    message_type = body.get("message_type") or "text"
+    participant = body.get("participant")
+    notify = body.get("notify")
+    media_path = body.get("media_path")
+    source = body.get("source")
+    timestamp = int(body.get("timestamp") or time.time())
+
+    if not user_jid or not content:
+        return {"error": "user_jid and content are required"}, 400
+
+    try:
+        from app.dashboard.config import CONFIG  # noqa: PLC0415
+        db_path = CONFIG.get("DASHBOARD_DB_PATH")
+        if not db_path:
+            return {"error": "dashboard db not configured"}, 503
+        import sqlite3
+        conn = sqlite3.connect(db_path, timeout=5)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                "INSERT INTO chat_messages "
+                "(user_jid, direction, content, message_type, timestamp, bot_jid, "
+                " participant, notify, media_path, source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_jid, direction, content, message_type, timestamp, bot_jid,
+                 participant, notify, media_path, source),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning("ingest_message db write failed: %s", exc)
+        return {"error": "db write failed"}, 500
+
+    # Notify connected dashboard clients in real-time
+    try:
+        sio = current_app.extensions.get("socketio")
+        if sio:
+            sio.emit("new_message", {
+                "bot_jid": bot_jid,
+                "user_jid": user_jid,
+                "direction": direction,
+                "content": content,
+                "message_type": message_type,
+                "timestamp": timestamp,
+            })
+    except Exception as exc:
+        logger.debug("ingest socket emit failed: %s", exc)
+
+    return {"ok": True}, 201
+
+
 @bot_bp.get("/status")
 def get_bot_status():
     """Return running state of a single bot (query ?phone=X) or legacy single-bot."""
     phone = request.args.get("phone", "").strip().lstrip("+")
+    # Try agent first when phone is specified
+    if phone:
+        agent_result = _try_agent_command(phone, "get_status", {"phone": phone})
+        if agent_result is not None:
+            return agent_result
     status = read_status(phone=phone or None)
     uptime: int | None = None
     if status.get("running") and status.get("started_at"):
@@ -275,6 +497,11 @@ def post_logout():
     from app.dashboard.utils.bot_status import clear_status
     body = request.get_json(silent=True) or {}
     phone = str(body.get("phone", "")).strip().lstrip("+") or None
+    # Try agent first
+    if phone:
+        agent_result = _try_agent_command(phone, "stop_bot", {"phone": phone})
+        if agent_result is not None:
+            return agent_result
     status = read_status(phone=phone)
     pid = status.get("pid")
     if not status.get("running") or not pid:
@@ -307,7 +534,8 @@ def post_logout():
 def post_bot_start():
     """
     Start the bot for an already-registered phone number.
-    Equivalent to running: python script/main.py <phone>
+    If a connected agent manages this phone, the command is forwarded to it.
+    Otherwise falls back to launching a local subprocess.
 
     Request body (JSON): {"phone": "989334018988"}
     Response:            {"ok": true, "pid": 12345}
@@ -319,6 +547,12 @@ def post_bot_start():
     if not phone.isdigit() or not (7 <= len(phone) <= 15):
         return {"error": "invalid phone number — digits only, 7-15 characters"}, 400
 
+    # Try agent first (agent manages bots on its own machine)
+    agent_result = _try_agent_command(phone, "start_bot", {"phone": phone})
+    if agent_result is not None:
+        return agent_result
+
+    # Fall back to local subprocess
     # Refuse to double-start the same phone
     status = read_status(phone=phone)
     if status.get("running") and status.get("pid") and _pid_alive(status["pid"]):

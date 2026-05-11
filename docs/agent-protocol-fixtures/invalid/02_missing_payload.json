@@ -1,0 +1,9 @@
+{
+  "msg_id": "6ccf31ff-52d4-42df-8a91-7d68b933a4cd",
+  "protocol_version": "1.0",
+  "type": "event",
+  "name": "bot_snapshot",
+  "agent_id": "agent-cn-sh01",
+  "timestamp": 1778445604,
+  "session_token": "sess_123456789"
+}

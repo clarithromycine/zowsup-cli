@@ -1,0 +1,12 @@
+{
+  "msg_id": "a8af71d8-4f8f-4fcd-a5e6-fa7f2cf28bbd",
+  "protocol_version": "1.0",
+  "type": "auth_ok",
+  "name": "agent_auth_ok",
+  "agent_id": "agent-cn-sh01",
+  "timestamp": 1778445601,
+  "payload": {
+    "session_token": "sess_123456789",
+    "expires_at": 1778449201
+  }
+}

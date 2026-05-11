@@ -1092,7 +1092,7 @@ class ZowBotLayer(YowInterfaceLayer):
                 )
                 # Phase 2: Wire up dashboard db for AI thought recording
                 self.ai_service.dashboard_db_path = _db.db_path
-                self._dashboard_db_path = _db.db_path  # also set on layer for direct saves
+                self._dashboard_db_path = _db.db_path  # None in agent mode — that's fine
                 # Phase 3: Wire up strategy manager
                 self.ai_service.strategy_manager = _db.get_strategy_manager()
                 
@@ -1308,8 +1308,24 @@ class ZowBotLayer(YowInterfaceLayer):
         media_path: absolute local path to a downloaded media file.
         source: 'ai' for AI-generated replies, 'manual' for human-operator sends, None for incoming.
         """
+        if not content:
+            return
+        # In AGENT_MODE the bridge forwards to the backend server via HTTP.
+        if os.environ.get("AGENT_MODE"):
+            _db.save_chat_message(
+                bot_jid=self.bot.botId or "",
+                user_jid=user_jid,
+                direction=direction,
+                content=content,
+                message_type=message_type,
+                participant=participant,
+                notify=notify,
+                media_path=media_path,
+                source=source,
+            )
+            return
         db_path = self._dashboard_db_path
-        if not db_path or not content:
+        if not db_path:
             return
         try:
             import sqlite3 as _sqlite3
@@ -1512,9 +1528,9 @@ class ZowBotLayer(YowInterfaceLayer):
             if await self._satisfaction.intercept(jid, text):
                 return
 
-        # Persist to dashboard.db for every text/media message, independent of AI
-        # (runs after satisfaction intercept so survey replies are excluded)
-        if text and self._dashboard_db_path:            
+        # Persist messages: either to local dashboard.db (DASHBOARD_MODE) or forward
+        # to backend server via HTTP (AGENT_MODE).  The two are mutually exclusive.
+        if text and (self._dashboard_db_path or os.environ.get("AGENT_MODE")):            
             direction = "out" if messageProtocolEntity.fromme else "in"
             participant = messageProtocolEntity.getParticipant() or None
             notify = messageProtocolEntity.getNotify() or None
