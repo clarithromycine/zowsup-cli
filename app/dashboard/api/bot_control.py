@@ -807,14 +807,22 @@ def list_accounts():
         if s.get("running") and s.get("pid") and _pid_alive(s["pid"])
     }
 
-    # Merge agent-reported running phones
+    # Merge agent-reported running phones; also collect all agent-managed phones
+    agent_phones: dict[str, str] = {}  # phone -> agent_id (ALL registered, not just running)
     try:
-        from app.dashboard.api.agent_gateway import get_agent_for_phone, get_agent_running_phones
+        from app.dashboard.api.agent_gateway import (
+            get_agent_for_phone,
+            get_agent_running_phones,
+            get_all_agent_phones,
+            get_agent_phone_status,
+        )
         agent_running = get_agent_running_phones()
         running_phones |= agent_running
+        agent_phones = get_all_agent_phones()
         _has_agent_info = True
     except Exception:
         get_agent_for_phone = lambda _: None  # noqa: E731
+        get_agent_phone_status = lambda _: None  # noqa: E731
         _has_agent_info = False
 
     failed = _read_failed()
@@ -852,6 +860,26 @@ def list_accounts():
                 "failed_at": failed.get(phone),
                 "last_seen": last_seen,
                 "agent_id": get_agent_for_phone(phone) if _has_agent_info else None,
+            })
+
+    # Append phones that are managed by agents but have no local account directory
+    if _has_agent_info and agent_phones:
+        local_phones = {a["phone"] for a in accounts}
+        for ph, aid in agent_phones.items():
+            if ph in local_phones:
+                continue
+            st = get_agent_phone_status(ph) or {}
+            # Derive a display name from the JID if available (e.g. "6281234@s.whatsapp.net" → "6281234")
+            jid = st.get("jid") or ""
+            pushname = jid.split("@")[0] if jid else None
+            accounts.append({
+                "phone": ph,
+                "pushname": pushname,
+                "is_running": bool(st.get("running")),
+                "is_failed": (ph in failed),
+                "failed_at": failed.get(ph),
+                "last_seen": None,
+                "agent_id": aid,
             })
 
     # Sort by last_seen descending (most recently touched first)

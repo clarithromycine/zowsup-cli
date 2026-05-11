@@ -149,6 +149,12 @@ def get_agent_phone_status(phone: str) -> Optional[dict]:
         return _agent_bot_status.get(phone.lstrip("+"))
 
 
+def get_all_agent_phones() -> dict[str, str]:
+    """Return {phone: agent_id} for every phone currently registered by a connected agent."""
+    with _registry_lock:
+        return dict(_agent_by_phone)
+
+
 def get_all_agents() -> list[dict]:
     """Snapshot of connected agents."""
     now = time.time()

@@ -464,15 +464,18 @@ def main() -> None:
 
     _stop = threading.Event()
 
-    def _sigterm(*_):
-        logger.info("SIGTERM received — stopping")
+    def _on_stop(*_):
+        if _stop.is_set():
+            return
+        logger.info("Stop signal received — shutting down")
         _stop.set()
         try:
             sio.disconnect()
         except Exception:
             pass
 
-    signal.signal(signal.SIGTERM, _sigterm)
+    signal.signal(signal.SIGTERM, _on_stop)
+    signal.signal(signal.SIGINT, _on_stop)   # handle Ctrl+C
 
     logger.info("Agent %s starting → %s", AGENT_ID, BACKEND_URL)
 
@@ -489,9 +492,6 @@ def main() -> None:
             sio.wait()
         except sio_lib.exceptions.ConnectionError as exc:
             logger.warning("Connection failed: %s — retry in 5 s", exc)
-        except KeyboardInterrupt:
-            logger.info("Keyboard interrupt — stopping")
-            break
         except Exception as exc:
             logger.error("Unexpected error: %s — retry in 5 s", exc)
 
