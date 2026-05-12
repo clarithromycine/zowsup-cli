@@ -34,7 +34,7 @@ class Cmd_Ai_Getconfig(BotCommand):
             
             # Get AI_LLM_ACTIVE configuration
             active_config = ai_service.config.get('ai_llm_active', {})
-            enabled = active_config.get('enabled', True)
+            enabled = active_config.get('enabled', False)
             backend = active_config.get('backend', 'GLM').upper()
             
             if query_type == "active":

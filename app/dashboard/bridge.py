@@ -48,7 +48,8 @@ class _NoDashboard:
     db_path: Optional[str] = None
 
     def get_ai_enabled(self, jid: str) -> bool:  # noqa: ANN001
-        """In standalone mode AI is always enabled."""
+        """In standalone mode, AIService is only initialized when config.conf
+        enabled=true, so this is only reached when AI is active."""
         return True
 
     def __getattr__(self, name: str):  # noqa: ANN204
@@ -171,6 +172,7 @@ class _Dashboard:
             return self._global_ai_default()
         try:
             import sqlite3 as _sqlite3  # noqa: PLC0415
+            print(self.db_path)
             conn = _sqlite3.connect(self.db_path, timeout=3)
             try:
                 row = conn.execute(

@@ -1078,9 +1078,17 @@ class ZowBotLayer(YowInterfaceLayer):
                 # Read AI configuration from config.conf
                 ai_config = self._load_ai_config()
 
-                # Always initialize AIService so per-conversation toggles can
-                # override the global default.  The global enabled flag is only
-                # the DEFAULT for new conversations (handled by get_ai_enabled).
+                # In standalone mode (no dashboard): config.conf enabled is
+                # the definitive switch — skip AIService entirely if false.
+                # In dashboard mode: always init so per-conversation toggles work;
+                # get_ai_enabled() handles the per-JID default at runtime.
+                global_enabled = ai_config.get('ai_llm_active', {}).get('enabled', True)
+                if not global_enabled and not _db.db_path:
+                    self.logger.debug("🔇 AI module disabled in config (standalone mode)")
+                    self.ai_service = None
+                    self._dashboard_db_path = _db.db_path
+                    return
+
                 self.ai_service = AIService(
                     db_path=str(db_file),
                     config=ai_config
