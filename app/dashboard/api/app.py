@@ -103,6 +103,10 @@ def create_app(db_path: str | None = None) -> Flask:
     from app.dashboard.api.translation import translation_bp
     app.register_blueprint(translation_bp, url_prefix="/api/translation")
 
+    # Per-conversation AI enable/disable (human takeover)
+    from app.dashboard.api.ai_settings import ai_settings_bp
+    app.register_blueprint(ai_settings_bp, url_prefix="/api/ai")
+
     # ------------------------------------------------------------------
     # Phase 7: Swagger UI docs endpoint
     # ------------------------------------------------------------------

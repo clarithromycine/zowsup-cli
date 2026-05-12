@@ -82,9 +82,7 @@ class MessageProtocolEntity(ProtocolEntity):
             return self.getParticipant(full)
         
         _from = self.getFrom(full)
-
-        print(_from)
-
+        
         a,b,c = WATools.jidDecode(_from)
 
         if _from.endswith("@lid"):

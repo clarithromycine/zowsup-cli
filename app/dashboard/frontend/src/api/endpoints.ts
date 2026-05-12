@@ -317,3 +317,18 @@ export async function postAgentStopBot(
   const { data } = await apiClient.post('/bot/logout', { phone })
   return data
 }
+
+// ---- Per-conversation AI settings ----
+
+export async function fetchAiSettings(jid: string): Promise<{ jid: string; ai_enabled: boolean }> {
+  const { data } = await apiClient.get(`/ai/settings/${encodeURIComponent(jid)}`)
+  return data
+}
+
+export async function saveAiSettings(
+  jid: string,
+  ai_enabled: boolean,
+): Promise<{ jid: string; ai_enabled: boolean }> {
+  const { data } = await apiClient.post(`/ai/settings/${encodeURIComponent(jid)}`, { ai_enabled })
+  return data
+}

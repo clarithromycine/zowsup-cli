@@ -68,7 +68,7 @@ def _fetch_stats(db_path: str) -> dict:
         ).fetchone()[0]
 
         ai_responses = conn.execute(
-            "SELECT COUNT(*) FROM chat_messages WHERE direction='out'"
+            "SELECT COUNT(*) FROM chat_messages WHERE direction='out' and source is null"  #source 有两种情况 null 是ai回复，非null是手动回复            
         ).fetchone()[0]
 
         today_messages = conn.execute(

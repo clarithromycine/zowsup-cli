@@ -82,6 +82,10 @@ interface DashboardState {
   // Translation: per-jid enabled flag + target language
   translationEnabled: Record<string, boolean>
   translationTargetLang: string
+
+  // Per-conversation AI disable (human takeover).
+  // true = AI disabled for this JID; absent/false = AI enabled.
+  aiDisabledJids: Record<string, boolean>
 }
 
 export interface BotLogEntry {
@@ -134,6 +138,10 @@ interface DashboardActions {
   toggleTranslation: (jid: string) => void
   setTranslationEnabled: (jid: string, enabled: boolean) => void
   setTranslationTargetLang: (lang: string) => void
+
+  // AI toggle actions (per-conversation human takeover)
+  toggleAiForJid: (jid: string) => void
+  setAiForJid: (jid: string, enabled: boolean) => void
 }
 
 type StoreState = DashboardState & DashboardActions
@@ -189,6 +197,8 @@ export const useDashboardStore = create<StoreState>()(
 
     translationEnabled: JSON.parse(localStorage.getItem('translation_enabled') ?? '{}') as Record<string, boolean>,
     translationTargetLang: localStorage.getItem('translation_target_lang') ?? 'zh',
+
+    aiDisabledJids: JSON.parse(localStorage.getItem('ai_disabled_jids') ?? '{}') as Record<string, boolean>,
 
     // ---- Actions ----
     setApiToken: (token) =>
@@ -394,6 +404,18 @@ export const useDashboardStore = create<StoreState>()(
       set((s) => {
         s.translationTargetLang = lang
         localStorage.setItem('translation_target_lang', lang)
+      }),
+
+    toggleAiForJid: (jid) =>
+      set((s) => {
+        s.aiDisabledJids[jid] = !s.aiDisabledJids[jid]
+        localStorage.setItem('ai_disabled_jids', JSON.stringify(s.aiDisabledJids))
+      }),
+
+    setAiForJid: (jid, enabled) =>
+      set((s) => {
+        s.aiDisabledJids[jid] = !enabled
+        localStorage.setItem('ai_disabled_jids', JSON.stringify(s.aiDisabledJids))
       }),
   })),
 )

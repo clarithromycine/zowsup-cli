@@ -47,6 +47,10 @@ class _NoDashboard:
 
     db_path: Optional[str] = None
 
+    def get_ai_enabled(self, jid: str) -> bool:  # noqa: ANN001
+        """In standalone mode AI is always enabled."""
+        return True
+
     def __getattr__(self, name: str):  # noqa: ANN204
         def _noop(*args, **kwargs):  # noqa: ANN002, ANN003
             return None
@@ -160,6 +164,24 @@ class _Dashboard:
         except Exception as exc:
             logger.debug("bridge.get_strategy_manager failed: %s", exc)
             return None
+
+    def get_ai_enabled(self, jid: str) -> bool:
+        """Return True if AI auto-reply is enabled for this JID (default: True)."""
+        if not self.db_path:
+            return True
+        try:
+            import sqlite3 as _sqlite3  # noqa: PLC0415
+            conn = _sqlite3.connect(self.db_path, timeout=3)
+            try:
+                row = conn.execute(
+                    "SELECT ai_enabled FROM ai_settings WHERE jid = ?", (jid,)
+                ).fetchone()
+                return row is None or bool(row[0])
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.debug("bridge.get_ai_enabled failed: %s", exc)
+            return True
 
     # ── Chat messages ─────────────────────────────────────────────────────
 

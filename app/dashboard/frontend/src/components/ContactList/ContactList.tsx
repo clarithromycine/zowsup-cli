@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { List, Input, Badge, Avatar, Typography, Spin, Empty, Tag, Tooltip, Switch, Space } from 'antd'
-import { UserOutlined, TeamOutlined, SearchOutlined, RobotOutlined, TranslationOutlined } from '@ant-design/icons'
+import { List, Input, Badge, Avatar, Typography, Spin, Empty, Tag, Tooltip } from 'antd'
+import { UserOutlined, TeamOutlined, SearchOutlined, RobotOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { fetchChatHistory, fetchContacts, fetchContactAvatar, refreshContactAvatar } from '../../api/endpoints'
 import { useDashboardStore } from '../../store'
@@ -52,8 +52,6 @@ const ContactList: React.FC = () => {
   const setMessages = useDashboardStore((s) => s.setMessages)
   const setMessagesLoading = useDashboardStore((s) => s.setMessagesLoading)
   const clearUnread = useDashboardStore((s) => s.clearUnread)
-  const translationEnabled = useDashboardStore((s) => s.translationEnabled)
-  const toggleTranslation = useDashboardStore((s) => s.toggleTranslation)
 
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
@@ -169,32 +167,6 @@ const ContactList: React.FC = () => {
                         style={isGroup(contact.jid) ? { backgroundColor: '#722ed1' } : undefined}
                       />
                     </Badge>
-
-                    <Tooltip
-                      title={
-                        translationEnabled[contact.jid]
-                          ? t('translate.disableFor')
-                          : t('translate.enableFor')
-                      }
-                    >
-                      <Space
-                        size={3}
-                        style={{ cursor: 'default' }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <TranslationOutlined
-                          style={{
-                            fontSize: 11,
-                            color: translationEnabled[contact.jid] ? '#1890ff' : '#d9d9d9',
-                          }}
-                        />
-                        <Switch
-                          size="small"
-                          checked={!!translationEnabled[contact.jid]}
-                          onChange={() => toggleTranslation(contact.jid)}
-                        />
-                      </Space>
-                    </Tooltip>
                   </div>
                 }
                 title={

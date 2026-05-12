@@ -407,5 +407,9 @@
     "inputPlaceholder": "Enter text to translate...",
     "outputText": "Translation Result",
     "outputPlaceholder": "Result will appear here..."
+  },
+  "chat": {
+    "aiEnable": "Enable AI replies",
+    "aiDisable": "Disable AI replies (manual mode)"
   }
 }

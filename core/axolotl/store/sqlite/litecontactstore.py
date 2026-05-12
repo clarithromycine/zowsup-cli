@@ -22,16 +22,13 @@ class LiteContactStore(TaskMsgStore):
                 "timestamp INTEGER);")                                    
                     
     def updateContact(self, jid,lid, name=None):
-
-        #检查jid和lid都要满足特定的条件，否则不加到联系人库里面
-
+        
         if jid is not None and not jid.endswith("s.whatsapp.net"):
             return None
         
         if lid is not None and not lid.endswith("lid"):
             return None
-                
-                                            
+                                                            
         if not self.findContact(jid,lid):
             q = "INSERT INTO contact(name,jid,lid,timestamp) VALUES(?,?,?,?)"
             self.dbConn.cursor().execute(q, (name, jid, lid, int(time.time())))
@@ -112,9 +109,7 @@ class LiteContactStore(TaskMsgStore):
     def updateName(self, jid=None, lid=None, name=None):
         if name is None:
             return False
-        
-        logger.debug("updateName jid=%s lid=%s name=%s", jid, lid, name)
-
+                
         if not self.findContact(jid, lid):
             self.updateContact(jid, lid, name=name)
             return True

@@ -199,6 +199,13 @@ CREATE TABLE IF NOT EXISTS bot_instances (
 );
 """
 
+_DDL_AI_SETTINGS = """
+CREATE TABLE IF NOT EXISTS ai_settings (
+    jid         TEXT PRIMARY KEY,
+    ai_enabled  INTEGER NOT NULL DEFAULT 1   -- 1=AI on (default), 0=AI off (human takeover)
+);
+"""
+
 _DDL_AGENT_COMMAND_JOBS = """
 CREATE TABLE IF NOT EXISTS agent_command_jobs (
     job_id          TEXT PRIMARY KEY,            -- UUID
@@ -259,6 +266,8 @@ _ALL_DDL = [
     _DDL_AGENT_KEYS,
     _DDL_BOT_INSTANCES,
     _DDL_AGENT_COMMAND_JOBS,
+    # Per-conversation AI enable/disable (human takeover)
+    _DDL_AI_SETTINGS,
 ] + _INDEXES
 
 

@@ -408,5 +408,9 @@
     "inputPlaceholder": "输入要翻译的内容…",
     "outputText": "翻译结果",
     "outputPlaceholder": "翻译结果将在这里显示…"
+  },
+  "chat": {
+    "aiEnable": "开启AI回复",
+    "aiDisable": "关闭AI回复（人工介入）"
   }
 }
