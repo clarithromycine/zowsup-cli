@@ -1584,7 +1584,10 @@ class ZowBotLayer(YowInterfaceLayer):
                 self._update_group_member_last_seen(jid, participant)
 
         # AI auto-reply processing (Phase 1.5: real API mode with message sending)
-        if self.ai_service and _db.get_ai_enabled(jid):
+        ai_enabled_for_jid = _db.get_ai_enabled(jid)
+        self.logger.debug("AI gate check: ai_service=%s get_ai_enabled(%s)=%s",
+                          self.ai_service is not None, jid, ai_enabled_for_jid)
+        if self.ai_service and ai_enabled_for_jid:
             try:
                 ai_result = await self.ai_service.process_message(
                     messageProtocolEntity,

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useEffect } from 'react'
 import { Row, Col, Card, Space, Switch, Tooltip } from 'antd'
 import { RobotOutlined, TranslationOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -8,7 +8,7 @@ import UserProfile from '../components/UserProfile/UserProfile'
 import GroupInfo from '../components/GroupInfo/GroupInfo'
 import StatisticsPanel from '../components/StatisticsPanel/StatisticsPanel'
 import { useDashboardStore } from '../store'
-import { saveAiSettings } from '../api/endpoints'
+import { fetchAiSettings, saveAiSettings } from '../api/endpoints'
 
 /**
  * Main Dashboard page.
@@ -30,15 +30,25 @@ const DashboardPage: React.FC = () => {
   const toggleTranslation = useDashboardStore((s) => s.toggleTranslation)
   const aiDisabledJids = useDashboardStore((s) => s.aiDisabledJids)
   const toggleAiForJid = useDashboardStore((s) => s.toggleAiForJid)
+  const setAiForJid = useDashboardStore((s) => s.setAiForJid)
+
+  // Sync the AI toggle state from the backend DB whenever a conversation is opened.
+  // This ensures the UI reflects the real DB state, not just stale localStorage.
+  useEffect(() => {
+    if (!selectedJid) return
+    fetchAiSettings(selectedJid)
+      .then(({ ai_enabled }) => { setAiForJid(selectedJid, ai_enabled) })
+      .catch(() => {}) // best-effort; keep localStorage value if fetch fails
+  }, [selectedJid, setAiForJid])
 
   const handleAiToggle = useCallback(async (jid: string) => {
     const currentlyDisabled = !!aiDisabledJids[jid]
     const newEnabled = currentlyDisabled        // toggling: if disabled → enable, if enabled → disable
-    toggleAiForJid(jid)
+    toggleAiForJid(jid)  // optimistic update
     try {
       await saveAiSettings(jid, newEnabled)
     } catch {
-      // best-effort backend sync; local state already updated
+      toggleAiForJid(jid)  // revert on failure so UI matches actual DB state
     }
   }, [aiDisabledJids, toggleAiForJid])
 

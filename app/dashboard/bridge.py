@@ -172,15 +172,18 @@ class _Dashboard:
             return self._global_ai_default()
         try:
             import sqlite3 as _sqlite3  # noqa: PLC0415
-            print(self.db_path)
             conn = _sqlite3.connect(self.db_path, timeout=3)
             try:
                 row = conn.execute(
                     "SELECT ai_enabled FROM ai_settings WHERE jid = ?", (jid,)
                 ).fetchone()
                 if row is not None:
-                    return bool(row[0])
-                return self._global_ai_default()
+                    result = bool(row[0])
+                    logger.debug("bridge.get_ai_enabled jid=%s db_row=%s result=%s", jid, row[0], result)
+                    return result
+                default = self._global_ai_default()
+                logger.debug("bridge.get_ai_enabled jid=%s no_row global_default=%s", jid, default)
+                return default
             finally:
                 conn.close()
         except Exception as exc:
