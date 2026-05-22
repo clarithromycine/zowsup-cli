@@ -97,6 +97,11 @@ _BOT_CONNECT_TIMEOUT = 60  # seconds to wait for main.py to reach running state
 _start_procs: "dict[str, subprocess.Popen]" = {}
 
 
+def _is_valid_phone(phone: str) -> bool:
+    """Return True when *phone* can be handled by bot start/export/delete APIs."""
+    return phone.isdigit() and 7 <= len(phone) <= 15
+
+
 # ---------------------------------------------------------------------------
 # Auth guard applied to every route in this blueprint
 # ---------------------------------------------------------------------------
@@ -870,6 +875,12 @@ def list_accounts():
             # Skip temp/hidden dirs
             if phone.startswith(".") or phone == "tmp":
                 continue
+            # ACCOUNT_PATH can also contain utility/profile folders such as
+            # "device". They are not startable accounts, and trying to load
+            # them as bot configs creates noisy "config not found" errors.
+            if not _is_valid_phone(phone):
+                logger.debug("Skipping non-phone account directory: %s", entry)
+                continue
 
             pushname = None
             try:
@@ -900,6 +911,8 @@ def list_accounts():
     if _has_agent_info and agent_phones:
         local_phones = {a["phone"] for a in accounts}
         for ph, aid in agent_phones.items():
+            if not _is_valid_phone(ph):
+                continue
             if ph in local_phones:
                 continue
             st = get_agent_phone_status(ph) or {}

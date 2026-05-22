@@ -10,6 +10,7 @@ tests
 dist
 build
 .idea
+pnpm-lock.yaml
 .tox
 config.conf
 .DS_Store
