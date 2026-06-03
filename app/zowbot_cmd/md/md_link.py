@@ -2,7 +2,7 @@
 
 from typing import Any, Optional, Dict, List, Tuple, Union, Callable
 import asyncio
-import logging
+import logging,base64
 from app.zowbot_cmd.base import BotCommand
 from core.layers.protocol_iq.protocolentities import MultiDevicePairDeviceIqProtocolEntity
 from common.utils import Utils
@@ -24,9 +24,12 @@ class Cmd_Md_Link(BotCommand):
         await bot.botLayer.resetSync(params, options)        
         profile = bot.botLayer.getStack().getProp("profile")
         qr_str = params[0]
+
+        if qr_str.startswith("https://") or qr_str.startswith("http://"):
+            qr_str = qr_str.split("#")[1]            
+
         ref, pubKey, deviceIdentity, keyIndexList = Utils.generateMultiDeviceParamsFromQrCode(qr_str, profile)
         
-
         try:
             entity = MultiDevicePairDeviceIqProtocolEntity(
                 ref=ref,
@@ -45,7 +48,7 @@ class Cmd_Md_Link(BotCommand):
             logger.info(f"Device paired: {companionJid}")            
             return self.success(
                 deviceJid = result.deviceJid,
-                companionProps = result.companionProps
+                companionProps = Utils.b64str(result.companionProps)
             )
                 
         except Exception as e:
