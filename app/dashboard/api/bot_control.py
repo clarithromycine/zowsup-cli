@@ -1062,7 +1062,7 @@ def import_account():
     if not lines:
         return {"error": "lines (list) required"}, 400
 
-    agent_id = str(body.get("agent_id", "")).strip() or None
+    agent_id = body.get("agent_id", "") or None
 
     # ── Remote import via agent ──────────────────────────────────────────────
     if agent_id:
