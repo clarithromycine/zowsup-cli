@@ -23,7 +23,7 @@ How it works
 ────────────
 1. Connects to BACKEND_URL on the /agent namespace with a signed auth token.
 2. Emits `agent_ready` with the phone list it manages.
-3. Listens for `command` events:  start_bot / stop_bot / get_status / list_phones
+3. Listens for `command` events:  start_bot / stop_bot / get_status / list_phones / md_link
 4. Sends `command_ack` after handling each command.
 5. Tails logs/<phone>.log and emits `agent_event` {type: bot_log, …}.
 6. Emits `agent_event` {type: heartbeat} every 30 s with all bot statuses.
@@ -81,6 +81,10 @@ if not KEY_SECRET:
 # ── Bot subprocess registry ───────────────────────────────────────────────────
 _bot_procs: dict[str, subprocess.Popen] = {}   # phone -> Popen
 _bot_procs_lock = threading.Lock()
+
+# One-shot command subprocesses, such as `main.py <phone> md.link <qr>`.
+_cmd_procs: dict[str, subprocess.Popen] = {}   # command key -> Popen
+_cmd_procs_lock = threading.Lock()
 
 # ── Log tail threads ──────────────────────────────────────────────────────────
 _log_tail_threads: dict[str, threading.Thread] = {}
@@ -294,10 +298,104 @@ def _enqueue_send_task(payload: dict) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+def _start_md_link(payload: dict) -> dict:
+    """
+    Start `md.link` for an existing account using a WhatsApp linked-devices QR URL.
+
+    Expected payload:
+        {"phone": "27626947061", "qr_code": "https://wa.me/settings/linked_devices#..."}
+    """
+    phone = str(payload.get("phone", "")).strip().lstrip("+")
+    qr_code = str(payload.get("qr_code", "")).strip()
+
+    if not phone:
+        return {"ok": False, "error": "phone required"}
+    if not phone.isdigit() or not (7 <= len(phone) <= 15):
+        return {"ok": False, "error": "invalid phone number"}
+    if not qr_code:
+        return {"ok": False, "error": "qr_code required"}
+
+    script = ROOT / "script" / "main.py"
+    if not script.exists():
+        return {"ok": False, "error": "script/main.py not found"}
+
+    key = f"md_link:{phone}"
+    with _cmd_procs_lock:
+        prev = _cmd_procs.get(key)
+        if prev and prev.poll() is None:
+            return {
+                "ok": False,
+                "error": "md.link already running for this phone",
+                "pid": prev.pid,
+                "phone": phone,
+            }
+
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, str(script), phone, "md.link", qr_code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+            cwd=str(ROOT),
+            env={
+                **os.environ,
+                "PYTHONIOENCODING": "utf-8",
+                "PYTHONUTF8": "1",
+                "AGENT_MODE": "1",
+                "AGENT_ID": AGENT_ID,
+                "AGENT_KEY_SECRET": KEY_SECRET,
+                "AGENT_BACKEND_URL": BACKEND_URL,
+            },
+        )
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    with _cmd_procs_lock:
+        _cmd_procs[key] = proc
+
+    threading.Thread(
+        target=_drain_md_link_stdout,
+        args=(phone, proc),
+        daemon=True,
+        name=f"drain-md-link-{phone}",
+    ).start()
+
+    logger.info("md.link started phone=%s PID=%s", phone, proc.pid)
+    _ensure_log_tail(phone)
+    return {"ok": True, "pid": proc.pid, "phone": phone}
+
+
 def _drain_proc_stdout(proc: subprocess.Popen) -> None:
     try:
         for _ in proc.stdout:  # type: ignore[union-attr]
             pass
+    except Exception:
+        pass
+
+
+def _drain_md_link_stdout(phone: str, proc: subprocess.Popen) -> None:
+    """Forward md.link subprocess stdout to the backend as bot_log events."""
+    try:
+        for raw in proc.stdout:  # type: ignore[union-attr]
+            line = raw.rstrip()
+            if not line:
+                continue
+            entry = _parse_log_line(line) or {
+                "ts": time.strftime("%H:%M:%S"),
+                "level": "INFO",
+                "logger": f"md.link.{phone}",
+                "message": line,
+            }
+            try:
+                sio.emit(
+                    "agent_event",
+                    {"type": "bot_log", "payload": {**entry, "bot_id": phone}},
+                    namespace="/agent",
+                )
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -454,6 +552,8 @@ def command(data):
             result = {"phones": _phone_list()}
         elif cmd_type == "send_message":
             result = _enqueue_send_task(payload)
+        elif cmd_type == "md_link":
+            result = _start_md_link(payload)
         elif cmd_type == "import_account":
             lines = [str(l).strip() for l in payload.get("lines", []) if str(l).strip()]
             if not lines:

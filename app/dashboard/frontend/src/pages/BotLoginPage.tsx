@@ -10,6 +10,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { io, Socket } from 'socket.io-client'
 import {
   Alert,
   Button,
@@ -48,6 +49,7 @@ import {
   postBotLoginScan,
   postBotLoginLinkcode,
   postBotStart,
+  postBotMdLink,
   postBotLogout,
   fetchBotAccounts,
   deleteBotAccount,
@@ -60,6 +62,7 @@ import {
 import type { BotAccount, AgentInfo } from '../api/endpoints'
 import { getApiToken } from '../api/client'
 import { useTranslation } from 'react-i18next'
+import type { BotLogEntry } from '../store'
 
 const { Paragraph, Text } = Typography
 
@@ -299,6 +302,16 @@ const AccountsSection: React.FC = () => {
   const [exportText, setExportText] = useState('')
   const [exporting, setExporting] = useState(false)
 
+  // md.link modal
+  const [mdLinkOpen, setMdLinkOpen] = useState(false)
+  const [mdLinkPhone, setMdLinkPhone] = useState('')
+  const [mdLinkQrCode, setMdLinkQrCode] = useState('')
+  const [mdLinking, setMdLinking] = useState(false)
+  const [mdLinkStatus, setMdLinkStatus] = useState<string | null>(null)
+  const [mdLinkError, setMdLinkError] = useState<string | null>(null)
+  const [mdLinkLogs, setMdLinkLogs] = useState<BotLogEntry[]>([])
+  const mdLinkSocketRef = useRef<Socket | null>(null)
+
   const esRef = useRef<Map<string, EventSource>>(new Map())
 
   const [msgApi, contextHolder] = message.useMessage()
@@ -490,6 +503,85 @@ const AccountsSection: React.FC = () => {
     }
   }
 
+  // ── md.link ──
+  const openMdLinkModal = (phone: string) => {
+    setMdLinkPhone(phone)
+    setMdLinkQrCode('')
+    setMdLinkStatus(null)
+    setMdLinkError(null)
+    setMdLinkLogs([])
+    setMdLinkOpen(true)
+  }
+
+  const stopMdLinkLogSocket = useCallback(() => {
+    const socket = mdLinkSocketRef.current
+    if (socket) {
+      if (mdLinkPhone) socket.emit('unsubscribe_logs', { bot_id: mdLinkPhone })
+      socket.disconnect()
+      mdLinkSocketRef.current = null
+    }
+  }, [mdLinkPhone])
+
+  const startMdLinkLogSocket = useCallback((phone: string) => {
+    stopMdLinkLogSocket()
+    const socket = io('/', {
+      path: '/socket.io',
+      transports: ['polling'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10_000,
+    })
+    mdLinkSocketRef.current = socket
+
+    const append = (entry: BotLogEntry) => {
+      if (entry.bot_id && entry.bot_id !== phone) return
+      setMdLinkLogs((prev) => [...prev, entry].slice(-120))
+    }
+
+    socket.on('connect', () => {
+      socket.emit('subscribe_logs', { bot_id: phone })
+    })
+    socket.on('bot_log', append)
+    socket.on('bot_log_snapshot', (entries: BotLogEntry[]) => {
+      setMdLinkLogs(entries.filter((entry) => !entry.bot_id || entry.bot_id === phone).slice(-120))
+    })
+    socket.on('connect_error', (err) => {
+      setMdLinkError(`日志连接失败：${err.message}`)
+    })
+  }, [stopMdLinkLogSocket])
+
+  useEffect(() => {
+    return () => stopMdLinkLogSocket()
+  }, [stopMdLinkLogSocket])
+
+  const handleMdLink = async () => {
+    const qrCode = mdLinkQrCode.trim()
+    if (!mdLinkPhone || !qrCode) {
+      setMdLinkError('请输入二维码内容')
+      return
+    }
+
+    setMdLinking(true)
+    setMdLinkStatus('正在提交配对请求...')
+    setMdLinkError(null)
+    setRowBusy(mdLinkPhone, true)
+    startMdLinkLogSocket(mdLinkPhone)
+    try {
+      const res = await postBotMdLink(mdLinkPhone, qrCode)
+      const okMsg = `扫码登录已启动，PID=${res.pid}`
+      setMdLinkStatus(okMsg)
+      msgApi.success(okMsg)
+      await load()
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setMdLinkError(msg)
+      setMdLinkStatus(null)
+    } finally {
+      setMdLinking(false)
+      setRowBusy(mdLinkPhone, false)
+    }
+  }
+
   const filteredAccounts = accounts.filter((a) => {
     if (searchQuery.trim() && !a.phone.includes(searchQuery.trim())) return false
     if (agentFilter && agentFilter !== '__ALL__') {
@@ -540,7 +632,7 @@ const AccountsSection: React.FC = () => {
       title: t('common.actions'),
       key: 'actions',
       fixed: 'right' as const,
-      width: 200,
+      width: 236,
       render: (_: unknown, record: BotAccount) => (
         <Space size={4}>
           {record.is_running ? (
@@ -575,6 +667,14 @@ const AccountsSection: React.FC = () => {
               size="small"
               icon={<CloudDownloadOutlined />}
               onClick={() => handleExport([record.phone])}
+            />
+          </Tooltip>
+          <Tooltip title="二维码登录">
+            <Button
+              size="small"
+              icon={<LinkOutlined />}
+              loading={rowLoading[record.phone] && mdLinkPhone === record.phone && mdLinking}
+              onClick={() => openMdLinkModal(record.phone)}
             />
           </Tooltip>
           <Popconfirm
@@ -789,6 +889,114 @@ const AccountsSection: React.FC = () => {
             style={{ fontFamily: 'monospace', fontSize: 12 }}
           />
         )}
+      </Modal>
+
+      {/* ── md.link modal ── */}
+      <Modal
+        title={`二维码登录 - ${mdLinkPhone}`}
+        open={mdLinkOpen}
+        onCancel={() => {
+          if (!mdLinking) {
+            setMdLinkOpen(false)
+            setMdLinkQrCode('')
+            setMdLinkStatus(null)
+            setMdLinkError(null)
+            stopMdLinkLogSocket()
+          }
+        }}
+        footer={
+          <Space>
+            <Button
+              onClick={() => {
+                setMdLinkOpen(false)
+                setMdLinkQrCode('')
+                setMdLinkStatus(null)
+                setMdLinkError(null)
+                stopMdLinkLogSocket()
+              }}
+              disabled={mdLinking}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="primary"
+              icon={<LinkOutlined />}
+              loading={mdLinking}
+              disabled={!mdLinkQrCode.trim()}
+              onClick={handleMdLink}
+            >
+              开始配对
+            </Button>
+          </Space>
+        }
+        width={680}
+      >
+        <Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          粘贴 WhatsApp Web 扫码登录二维码内容，例如 https://wa.me/settings/linked_devices#...
+        </Paragraph>
+        <Input.TextArea
+          rows={3}
+          value={mdLinkQrCode}
+          onChange={(e) => setMdLinkQrCode(e.target.value)}
+          placeholder="https://wa.me/settings/linked_devices#..."
+          style={{ fontFamily: 'monospace', fontSize: 12 }}
+        />
+        {mdLinkStatus && (
+          <Alert
+            style={{ marginTop: 12 }}
+            type="success"
+            message={mdLinkStatus}
+            showIcon
+          />
+        )}
+        {mdLinkError && (
+          <Alert
+            style={{ marginTop: 12 }}
+            type="error"
+            message={mdLinkError}
+            showIcon
+          />
+        )}
+        <div
+          style={{
+            marginTop: 12,
+            minHeight: 160,
+            maxHeight: 260,
+            overflow: 'auto',
+            background: '#111827',
+            color: '#e5e7eb',
+            borderRadius: 6,
+            padding: 12,
+            fontFamily: 'Consolas, "Courier New", monospace',
+            fontSize: 12,
+            lineHeight: 1.5,
+          }}
+        >
+          {mdLinkLogs.length === 0 ? (
+            <Text style={{ color: '#9ca3af' }}>
+              日志会在启动后显示在这里...
+            </Text>
+          ) : (
+            mdLinkLogs.map((entry, index) => (
+              <div key={`${entry.ts}-${index}`}>
+                <span style={{ color: '#9ca3af' }}>[{entry.ts}]</span>{' '}
+                <span
+                  style={{
+                    color:
+                      entry.level === 'ERROR' || entry.level === 'CRITICAL'
+                        ? '#f87171'
+                        : entry.level === 'WARNING'
+                          ? '#fbbf24'
+                          : '#93c5fd',
+                  }}
+                >
+                  {entry.level}
+                </span>{' '}
+                <span>{entry.message}</span>
+              </div>
+            ))
+          )}
+        </div>
       </Modal>
 
     </Card>

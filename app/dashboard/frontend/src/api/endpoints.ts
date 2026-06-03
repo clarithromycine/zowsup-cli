@@ -184,6 +184,14 @@ export async function postBotStart(
   return data
 }
 
+export async function postBotMdLink(
+  phone: string,
+  qrCode: string,
+): Promise<{ ok: boolean; pid: number; phone: string }> {
+  const { data } = await apiClient.post('/bot/md-link', { phone, qr_code: qrCode })
+  return data
+}
+
 // ---- Bot Account Management ----
 
 export interface BotAccount {

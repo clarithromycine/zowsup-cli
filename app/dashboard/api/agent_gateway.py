@@ -23,6 +23,9 @@ start_bot    {"phone": "..."}
 stop_bot     {"phone": "..."}
 get_status   {"phone": "..."} or {} for all
 list_phones  {}
+send_message {"to_jid": "...", "message_type": "...", ...}
+import_account {"lines": ["phone,pk1,sk1,pk2,sk2,sixth", ...]}
+md_link      {"phone": "...", "qr_code": "https://wa.me/settings/linked_devices#..."}
 
 Events from agents (from agent → backend → frontend)
 ─────────────────────────────────────────────────────

@@ -96,6 +96,9 @@ _BOT_CONNECT_TIMEOUT = 60  # seconds to wait for main.py to reach running state
 # Replaces the old single _start_proc variable.
 _start_procs: "dict[str, subprocess.Popen]" = {}
 
+# One-shot md.link processes keyed by phone.
+_md_link_procs: "dict[str, subprocess.Popen]" = {}
+
 
 # ---------------------------------------------------------------------------
 # Auth guard applied to every route in this blueprint
@@ -509,6 +512,79 @@ def post_login_linkcode():
 
 
 # ---------------------------------------------------------------------------
+# B.4b  POST /api/bot/md-link
+# ---------------------------------------------------------------------------
+
+@bot_bp.post("/md-link")
+@limiter.limit("10 per minute")
+def post_md_link():
+    """
+    Start the `md.link` flow for an existing account using a web QR payload.
+
+    Request body:
+        {"phone": "27626947061", "qr_code": "https://wa.me/settings/linked_devices#..."}
+
+    The command is started as a one-shot subprocess:
+        script/main.py <phone> md.link <qr_code>
+    """
+    body = request.get_json(silent=True) or {}
+    phone = str(body.get("phone", "")).strip().lstrip("+")
+    qr_code = str(body.get("qr_code", "")).strip()
+
+    if not phone:
+        return {"error": "phone required"}, 400
+    if not phone.isdigit() or not (7 <= len(phone) <= 15):
+        return {"error": "invalid phone number — digits only, 7-15 characters"}, 400
+    if not qr_code:
+        return {"error": "qr_code required"}, 400
+
+    payload = {"phone": phone, "qr_code": qr_code}
+
+    # Try agent first (agent owns the local account files on its machine).
+    try:
+        agent_result = _try_agent_command(phone, "md_link", payload)
+    except RuntimeError as exc:
+        return {"error": str(exc)}, 503
+    if agent_result is not None:
+        return agent_result
+
+    if _BOT_DRIVER_MODE == "agent":
+        return {"error": f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}"}, 503
+
+    script_path = _resolve_script("main.py")
+    if not script_path.exists():
+        return {"error": "script/main.py not found"}, 404
+
+    prev = _md_link_procs.get(phone)
+    if prev is not None and prev.poll() is None:
+        return {
+            "error": "md.link already running for this phone",
+            "pid": prev.pid,
+            "phone": phone,
+        }, 409
+
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, str(script_path), phone, "md.link", qr_code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+            cwd=str(Path.cwd()),
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+        )
+    except OSError as exc:
+        logger.error("Failed to start md.link for phone=%s: %s", phone, exc)
+        return {"error": str(exc)}, 500
+
+    _md_link_procs[phone] = proc
+    _start_md_link_drain_thread(phone, proc, current_app.extensions.get("socketio"))
+    logger.info("md.link subprocess launched, PID=%s, phone=%s", proc.pid, phone)
+    return {"ok": True, "pid": proc.pid, "phone": phone}
+
+
+# ---------------------------------------------------------------------------
 # B.5  POST /api/bot/logout
 # ---------------------------------------------------------------------------
 
@@ -741,6 +817,42 @@ def _start_drain_thread(proc: "subprocess.Popen") -> None:
     t = threading.Thread(target=_drain, daemon=True, name=f"bot-stdout-drain-{proc.pid}")
     t.start()
     logger.debug("Started stdout drain thread for bot PID=%s", proc.pid)
+
+
+def _start_md_link_drain_thread(phone: str, proc: "subprocess.Popen", sio) -> None:
+    """Drain md.link stdout and forward lines to Socket.IO bot_log subscribers."""
+    if proc is None or proc.stdout is None:
+        return
+
+    def _drain():
+        try:
+            try:
+                from app.dashboard.api.websocket import _parse_log_line
+            except Exception:
+                _parse_log_line = None
+
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                if not line:
+                    continue
+                entry = _parse_log_line(line) if _parse_log_line else None
+                if entry is None:
+                    entry = {
+                        "ts": time.strftime("%H:%M:%S"),
+                        "level": "INFO",
+                        "logger": f"md.link.{phone}",
+                        "message": line,
+                    }
+                entry = {**entry, "bot_id": phone}
+                if sio is not None:
+                    sio.emit("bot_log", entry, room="logs")
+                    sio.emit("bot_log", entry, room=f"logs:{phone}")
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_drain, daemon=True, name=f"md-link-stdout-{proc.pid}")
+    t.start()
+    logger.debug("Started md.link stdout forwarder for phone=%s PID=%s", phone, proc.pid)
 
 
 def _resolve_script(name: str) -> Path:
