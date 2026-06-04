@@ -554,8 +554,14 @@ const AccountsSection: React.FC = () => {
     return () => stopMdLinkLogSocket()
   }, [stopMdLinkLogSocket])
 
+  const extractMdLinkQrPayload = (value: string) => {
+    const trimmed = value.trim()
+    const hashIndex = trimmed.indexOf('#')
+    return hashIndex >= 0 ? trimmed.slice(hashIndex + 1).trim() : trimmed
+  }
+
   const handleMdLink = async () => {
-    const qrCode = mdLinkQrCode.trim()
+    const qrCode = extractMdLinkQrPayload(mdLinkQrCode)
     if (!mdLinkPhone || !qrCode) {
       setMdLinkError('请输入二维码内容')
       return
@@ -932,15 +938,24 @@ const AccountsSection: React.FC = () => {
         width={680}
       >
         <Paragraph type="secondary" style={{ marginBottom: 8 }}>
-          粘贴 WhatsApp Web 扫码登录二维码内容，例如 https://wa.me/settings/linked_devices#...
+          粘贴二维码内容。
+          {' '}
+          <a href="https://web.whatsapp.com/" target="_blank" rel="noopener noreferrer">
+            打开 WhatsApp Web
+          </a>
         </Paragraph>
         <Input.TextArea
           rows={3}
           value={mdLinkQrCode}
           onChange={(e) => setMdLinkQrCode(e.target.value)}
-          placeholder="https://wa.me/settings/linked_devices#..."
+          placeholder="2@...,key2,key3,key4,1"
           style={{ fontFamily: 'monospace', fontSize: 12 }}
         />
+        {mdLinkQrCode.includes('#') && (
+          <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+            将提交：{extractMdLinkQrPayload(mdLinkQrCode)}
+          </Paragraph>
+        )}
         {mdLinkStatus && (
           <Alert
             style={{ marginTop: 12 }}

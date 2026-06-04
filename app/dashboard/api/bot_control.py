@@ -530,6 +530,8 @@ def post_md_link():
     body = request.get_json(silent=True) or {}
     phone = str(body.get("phone", "")).strip().lstrip("+")
     qr_code = str(body.get("qr_code", "")).strip()
+    if "#" in qr_code:
+        qr_code = qr_code.split("#", 1)[1].strip()
 
     if not phone:
         return {"error": "phone required"}, 400

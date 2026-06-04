@@ -102,12 +102,12 @@ class AsyncCommandExec:
 
     def _get_wait_time(self, cmd_name):
         """根据命令类型返回等待时间"""
+        if SysVar.CMD_WAIT is not None:
+            return SysVar.CMD_WAIT
+
         if cmd_name == "init":
             return 10
-        elif cmd_name == "mdlink":
-            return 60
+        elif cmd_name in ("mdlink", "md.link"):
+            return 180
         else:
             return 20
-
-        # 允许通过配置覆盖
-        return SysVar.CMD_WAIT if SysVar.CMD_WAIT is not None else 20

@@ -548,70 +548,84 @@ class ZowBotLayer(YowInterfaceLayer):
                 await asyncio.sleep(3)           
 
                 async def on_get_conn_success(conn_entity, original_iq_entity):   
+                    sync_future = self.getStack().getProp("md-link-sync-future")
+                    try:
+                        hs = HistorySync(conn_entity,companionJid)
 
-                    hs = HistorySync(conn_entity,companionJid)
+                        et = hs.createNonBlockingDataMessage()
+                        await self.toLower(et)
+                        et = hs.createInitialStatusV3Message()
+                        await self.toLower(et)
+                        et = hs.createPushNameMessage()
+                        await self.toLower(et)
+                        et = hs.createInitialBootstrapMessage(conversations=[ConversationAttribute(id="TEST")])
+                        await self.toLower(et)
+                        et = hs.createRecentMessage()
+                        await self.toLower(et)
+                        
+                        et = TrustContactIqProtocolEntity(Jid.normalize(self.bot.botId),int(time.time()))
+                        await self.toLower(et)
 
-                    et = hs.createNonBlockingDataMessage()
-                    await self.toLower(et)
-                    et = hs.createInitialStatusV3Message()
-                    await self.toLower(et)
-                    et = hs.createPushNameMessage()
-                    await self.toLower(et)
-                    et = hs.createInitialBootstrapMessage(conversations=[ConversationAttribute(id="TEST")])
-                    await self.toLower(et)
-                    et = hs.createRecentMessage()
-                    await self.toLower(et)
+                        #######################APP STATE SYNC START###############################
+
+                        #  critical_block critical_unblock_low
                     
-                    et = TrustContactIqProtocolEntity(Jid.normalize(self.bot.botId),int(time.time()))
-                    await self.toLower(et)
 
-                    #######################APP STATE SYNC START###############################
+                        if not self.db:
+                            return 
+                        
+                        key = self.db._store.getOneAppStateKey()  
+                        mutationKeys = MutationKeys.createFromKey(key.key_data.key_data)
 
-                    #  critical_block critical_unblock_low
-                
+                        localeSetting = SyncActionDataAttribute.createFromSyncActionValue(SyncActionValueAttribute(
+                                    localeSetting=SyncActionLocaleSettingAttribute(locale="zh_CN")
+                                ))     
+                        pushNameSetting = SyncActionDataAttribute.createFromSyncActionValue(SyncActionValueAttribute(
+                                    pushNameSetting=SyncActionPushnameSettingAttribute(name="enx test")                            
+                                ))    
 
-                    if not self.db:
-                        return 
-                    
-                    key = self.db._store.getOneAppStateKey()  
-                    mutationKeys = MutationKeys.createFromKey(key.key_data.key_data)
-
-                    localeSetting = SyncActionDataAttribute.createFromSyncActionValue(SyncActionValueAttribute(
-                                localeSetting=SyncActionLocaleSettingAttribute(locale="zh_CN")
-                            ))     
-                    pushNameSetting = SyncActionDataAttribute.createFromSyncActionValue(SyncActionValueAttribute(
-                                pushNameSetting=SyncActionPushnameSettingAttribute(name="enx test")                            
-                            ))    
-
-                    state = HashState("critical_block",0)                        
-                    state,syncdPatch1 = PatchBuilder(state,mutationKeys,key).addMutation(localeSetting).addMutation(pushNameSetting).finish()                                                            
-     
-                    name1 = SyncActionDataAttribute.createFromSyncActionValue(SyncActionValueAttribute(
-                                contactAction=SyncActionContactActionAttribute(fullName="test user",firstName="test",lidJid="8618502060000@s.whatsapp.net")                           
-                            ).setArgs(["8618502060000@s.whatsapp.net"]))     
+                        state = HashState("critical_block",0)                        
+                        state,syncdPatch1 = PatchBuilder(state,mutationKeys,key).addMutation(localeSetting).addMutation(pushNameSetting).finish()                                                            
          
+                        name1 = SyncActionDataAttribute.createFromSyncActionValue(SyncActionValueAttribute(
+                                    contactAction=SyncActionContactActionAttribute(fullName="test user",firstName="test",lidJid="8618502060000@s.whatsapp.net")                           
+                                ).setArgs(["8618502060000@s.whatsapp.net"]))     
+             
 
-                    state2 = HashState("critical_unblock_low",0)
-                    state2,syncdPatch2  = PatchBuilder(state2,mutationKeys,key).addMutation(name1).finish()
+                        state2 = HashState("critical_unblock_low",0)
+                        state2,syncdPatch2  = PatchBuilder(state2,mutationKeys,key).addMutation(name1).finish()
 
-                                      
-                    entity = AppSyncStateIqProtocolEntity(
-                        patches = {
-                            "critical_unblock_low":syncdPatch2.encode(),
-                            "critical_block":syncdPatch1.encode()
-                        }                    
-                    )
+                                          
+                        entity = AppSyncStateIqProtocolEntity(
+                            patches = {
+                                "critical_unblock_low":syncdPatch2.encode(),
+                                "critical_block":syncdPatch1.encode()
+                            }                    
+                        )
 
-                    await self.toLower(entity)
+                        await self.toLower(entity)
+                    except Exception as e:
+                        if sync_future is not None and not sync_future.done():
+                            sync_future.set_exception(e)
+                        raise
+                    finally:
+                        if sync_future is not None and not sync_future.done():
+                            sync_future.set_result({"status": "ok"})
 
                 def on_get_conn_error(entity, original_iq_entity):  
                     self.logger.error("get conn error")
+                    sync_future = self.getStack().getProp("md-link-sync-future")
+                    if sync_future is not None and not sync_future.done():
+                        sync_future.set_exception(Exception("get conn error"))
 
                 conniq = RequestMediaConnIqProtocolEntity()
                 await self._sendIq(conniq,on_get_conn_success,on_get_conn_error)
 
             def on_get_encrypt_error(entity, on_get_encrypt_error):
                 self.logger.error("error get encrypt")
+                sync_future = self.getStack().getProp("md-link-sync-future")
+                if sync_future is not None and not sync_future.done():
+                    sync_future.set_exception(Exception("error get encrypt"))
 
             await self._sendIq(entity, on_get_encrypt_success, on_get_encrypt_error)                 
 

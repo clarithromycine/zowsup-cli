@@ -307,6 +307,8 @@ def _start_md_link(payload: dict) -> dict:
     """
     phone = str(payload.get("phone", "")).strip().lstrip("+")
     qr_code = str(payload.get("qr_code", "")).strip()
+    if "#" in qr_code:
+        qr_code = qr_code.split("#", 1)[1].strip()
 
     if not phone:
         return {"ok": False, "error": "phone required"}

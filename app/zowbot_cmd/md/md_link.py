@@ -24,6 +24,8 @@ class Cmd_Md_Link(BotCommand):
         await bot.botLayer.resetSync(params, options)        
         profile = bot.botLayer.getStack().getProp("profile")
         qr_str = params[0]
+        if "#" in qr_str:
+            qr_str = qr_str.split("#", 1)[1].strip()
         ref, pubKey, deviceIdentity, keyIndexList = Utils.generateMultiDeviceParamsFromQrCode(qr_str, profile)
         
 
@@ -42,10 +44,20 @@ class Cmd_Md_Link(BotCommand):
             profile.write_config(profile.config)
             
             bot.botLayer.getStack().setProp("pair-companion-jid", companionJid)
-            logger.info(f"Device paired: {companionJid}")            
+            logger.info(f"Device paired: {companionJid}")
+
+            sync_future = asyncio.get_running_loop().create_future()
+            bot.botLayer.getStack().setProp("md-link-sync-future", sync_future)
+            try:
+                wait_seconds = int(options.get("mdlinkwait", 180)) if options else 180
+                logger.info("Waiting for md.link account sync to complete")
+                await asyncio.wait_for(sync_future, timeout=wait_seconds)
+                logger.info("md.link account sync completed")
+            finally:
+                bot.botLayer.getStack().setProp("md-link-sync-future", None)
+
             return self.success(
                 deviceJid = result.deviceJid,
-                companionProps = result.companionProps
             )
                 
         except Exception as e:
