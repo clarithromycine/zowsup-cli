@@ -101,6 +101,7 @@ _BOT_STARTUP_TIMEOUT = 30  # seconds to wait for link-code to appear
 _BOT_CONNECT_TIMEOUT = 60  # seconds to wait for main.py to reach running state
 _MD_LINK_SYNC_TIMEOUT = 180.0  # wait inside bot after md.link IQ succeeds
 _MD_LINK_HTTP_TIMEOUT = 240.0  # overall API wait; includes login/startup time
+_BOT_COMMAND_HTTP_TIMEOUT = 90.0
 
 # Dict of running main.py processes keyed by phone string.
 # Replaces the old single _start_proc variable.
@@ -708,6 +709,79 @@ def post_md_link():
             "ok": False,
             "task_id": task_id,
             "error": result.get("detail") or "md.link failed",
+            "result": result.get("result") or {},
+        }, 502
+
+    return {
+        "ok": True,
+        "task_id": task_id,
+        **(result.get("result") or {}),
+    }
+
+
+# ---------------------------------------------------------------------------
+# B.6c  POST /api/bot/md-removeall
+# ---------------------------------------------------------------------------
+
+@bot_bp.post("/md-removeall")
+@limiter.limit("5 per minute")
+def post_md_removeall():
+    """
+    Remove all linked companion devices.
+
+    Body: {"phone": "27626947061"}
+    Internally executes: md.remove all
+    """
+    body = request.get_json(silent=True) or {}
+    phone = str(body.get("phone", "")).strip().lstrip("+")
+    if not phone:
+        return {"error": "phone required"}, 400
+    if not phone.isdigit() or not (7 <= len(phone) <= 15):
+        return {"error": "invalid phone number — digits only, 7-15 characters"}, 400
+
+    http_timeout = _coerce_timeout(body.get("timeout"), _BOT_COMMAND_HTTP_TIMEOUT, 10.0, 180.0)
+    payload = {"phone": phone, "timeout": http_timeout}
+
+    try:
+        agent_result = _try_agent_command(phone, "md_removeall", payload, timeout=http_timeout + 5.0)
+    except RuntimeError as exc:
+        return {"error": str(exc)}, 503
+    if agent_result is not None:
+        status = 200 if agent_result.get("ok") else 502
+        return agent_result, status
+    if _BOT_DRIVER_MODE == "agent":
+        return {"error": f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}"}, 503
+
+    start_result = _ensure_local_bot_started(phone)
+    if not start_result.get("ok"):
+        return {"error": start_result.get("error", "failed to start bot"), "phone": phone}, 502
+
+    try:
+        from app.dashboard.utils.bot_command_queue import (
+            cancel_bot_command_task,
+            enqueue_bot_command_task,
+            wait_bot_command_result,
+        )
+        task_id = enqueue_bot_command_task(phone, "md.remove", ["all"], {})
+        result = wait_bot_command_result(task_id, timeout=http_timeout)
+    except Exception as exc:
+        logger.exception("md-removeall queue failed")
+        return {"error": str(exc)}, 500
+
+    if result is None:
+        cancelled = cancel_bot_command_task(task_id)
+        return {
+            "ok": False,
+            "error": "md.remove all did not finish within timeout",
+            "task_id": task_id,
+            "cancelled": cancelled,
+        }, 504
+
+    if not result.get("success"):
+        return {
+            "ok": False,
+            "task_id": task_id,
+            "error": result.get("detail") or "md.remove all failed",
             "result": result.get("result") or {},
         }, 502
 

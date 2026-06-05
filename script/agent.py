@@ -342,6 +342,49 @@ def _md_link(payload: dict) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+def _md_removeall(payload: dict) -> dict:
+    phone = str(payload.get("phone", "")).strip().lstrip("+")
+    if not phone:
+        return {"ok": False, "error": "phone required"}
+
+    try:
+        timeout = float(payload.get("timeout") or 90.0)
+    except (TypeError, ValueError):
+        timeout = 90.0
+
+    start_result = _start_bot(phone)
+    if not start_result.get("ok"):
+        return {"ok": False, "error": start_result.get("error", "failed to start bot"), "phone": phone}
+
+    try:
+        from app.dashboard.utils.bot_command_queue import (
+            cancel_bot_command_task,
+            enqueue_bot_command_task,
+            wait_bot_command_result,
+        )
+        task_id = enqueue_bot_command_task(phone, "md.remove", ["all"], {})
+        result = wait_bot_command_result(task_id, timeout=timeout)
+        if result is None:
+            cancelled = cancel_bot_command_task(task_id)
+            return {
+                "ok": False,
+                "error": "md.remove all did not finish within timeout",
+                "task_id": task_id,
+                "cancelled": cancelled,
+            }
+        if not result.get("success"):
+            return {
+                "ok": False,
+                "task_id": task_id,
+                "error": result.get("detail") or "md.remove all failed",
+                "result": result.get("result") or {},
+            }
+        return {"ok": True, "task_id": task_id, **(result.get("result") or {})}
+    except Exception as exc:
+        logger.error("Failed to run md.remove all task: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
 def _drain_proc_stdout(proc: subprocess.Popen) -> None:
     try:
         for _ in proc.stdout:  # type: ignore[union-attr]
@@ -504,6 +547,8 @@ def command(data):
             result = _enqueue_send_task(payload)
         elif cmd_type == "md_link":
             result = _md_link(payload)
+        elif cmd_type == "md_removeall":
+            result = _md_removeall(payload)
         elif cmd_type == "import_account":
             lines = [str(l).strip() for l in payload.get("lines", []) if str(l).strip()]
             if not lines:

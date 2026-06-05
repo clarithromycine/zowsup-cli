@@ -298,6 +298,51 @@ async def _md_link_queue_poll_task(layer, poll_interval: int = 1):
         logger.debug("md.link queue poll task cancelled")
 
 
+async def _bot_command_queue_poll_task(layer, poll_interval: int = 1):
+    """Execute approved queued bot commands after the account is logged in."""
+    allowed_commands = {"md.remove"}
+    try:
+        logger.debug("bot command queue poll task started (interval=%ds)", poll_interval)
+        while True:
+            await asyncio.sleep(poll_interval)
+            bot_id = layer.bot.botId or ""
+            phone = bot_id.split("_", 1)[0]
+            if not phone:
+                continue
+            try:
+                from app.dashboard.utils.bot_command_queue import (
+                    dequeue_bot_command_tasks,
+                    write_bot_command_result,
+                )
+                tasks = dequeue_bot_command_tasks(phone=phone)
+            except Exception as exc:
+                logger.debug("bot command queue read failed: %s", exc)
+                continue
+
+            for task in tasks:
+                task_id = str(task.get("id", "?"))
+                try:
+                    command = str(task.get("command", "")).strip()
+                    if command not in allowed_commands:
+                        raise ValueError(f"command not allowed: {command}")
+                    params = task.get("params") if isinstance(task.get("params"), list) else []
+                    options = task.get("options") if isinstance(task.get("options"), dict) else {}
+                    result = await layer.executeCommand(command, params, options)
+                    if isinstance(result, dict):
+                        if result.get("retcode", 0) != 0:
+                            raise RuntimeError(result.get("msg") or f"{command} failed")
+                        payload = result
+                    else:
+                        payload = {"value": result}
+                    write_bot_command_result(task_id, success=True, result=payload)
+                    logger.info("bot command queue: task %s completed command=%s", task_id, command)
+                except Exception as exc:
+                    write_bot_command_result(task_id, success=False, detail=str(exc))
+                    logger.warning("bot command queue: task %s failed: %s", task_id, exc)
+    except asyncio.CancelledError:
+        logger.debug("bot command queue poll task cancelled")
+
+
 class ZowBotLayer(YowInterfaceLayer):
 
     PROP_MESSAGES = "org.openwhatsapp.zowsup.prop.sendclient.queue"
@@ -323,6 +368,7 @@ class ZowBotLayer(YowInterfaceLayer):
         self._qrTask = None
         self._avatarTask = None
         self._mdLinkQueueTask = None
+        self._botCommandQueueTask = None
         self._mdLinkSyncFuture = None
         self.loginFailCount = 0
         self.pairingStatus = None
@@ -1157,6 +1203,14 @@ class ZowBotLayer(YowInterfaceLayer):
                 self.logger.debug("md.link queue poll task scheduled")
             except Exception as exc:
                 self.logger.debug("Could not schedule md.link queue poll task: %s", exc)
+
+        if self._botCommandQueueTask is None or self._botCommandQueueTask.done():
+            try:
+                loop = asyncio.get_event_loop()
+                self._botCommandQueueTask = loop.create_task(_bot_command_queue_poll_task(self))
+                self.logger.debug("bot command queue poll task scheduled")
+            except Exception as exc:
+                self.logger.debug("Could not schedule bot command queue poll task: %s", exc)
 
         self.bot.lastOnlineTime = int(time.time()) 
 
