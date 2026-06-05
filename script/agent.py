@@ -73,6 +73,7 @@ except ImportError:
 AGENT_ID = os.environ.get("AGENT_ID", socket.gethostname())
 KEY_SECRET = os.environ.get("AGENT_KEY_SECRET", "")
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:5000")
+IMPORT_ENV_VALUES = {"android", "smb_android", "ios", "smb_ios"}
 
 if not KEY_SECRET:
     logger.error("AGENT_KEY_SECRET is not set. Refusing to start.")
@@ -551,8 +552,11 @@ def command(data):
             result = _md_removeall(payload)
         elif cmd_type == "import_account":
             lines = [str(l).strip() for l in payload.get("lines", []) if str(l).strip()]
+            import_env = str(payload.get("env", "android")).strip() or "android"
             if not lines:
                 result = {"ok": False, "error": "lines required"}
+            elif import_env not in IMPORT_ENV_VALUES:
+                result = {"ok": False, "error": "invalid env", "allowed": sorted(IMPORT_ENV_VALUES)}
             else:
                 script = ROOT / "script" / "import6.py"
                 if not script.exists():
@@ -562,7 +566,7 @@ def command(data):
                     for line in lines:
                         try:
                             proc = subprocess.run(
-                                [sys.executable, str(script), line],
+                                [sys.executable, str(script), line, "--env", import_env],
                                 capture_output=True,
                                 text=True,
                                 timeout=30,
@@ -587,6 +591,7 @@ def command(data):
                         "ok": True,
                         "imported": success,
                         "total": len(import_results),
+                        "env": import_env,
                         "results": import_results,
                     }
         else:

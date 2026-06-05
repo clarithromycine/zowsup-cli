@@ -430,7 +430,7 @@ Provider config is saved to `data/translation_config.json` (excluded from git). 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/bot/accounts` | List accounts with live status and agent assignment |
-| `POST` | `/api/bot/import` | Import 6-segment strings (optional `agent_id` to import on a remote agent) |
+| `POST` | `/api/bot/import` | Import 6-segment strings (optional `agent_id`; optional `env`: `android`, `smb_android`, `ios`, `smb_ios`) |
 | `POST` | `/api/bot/export` | Export 6-segment strings |
 | `DELETE` | `/api/bot/accounts/<phone>` | Delete account directory |
 | `PATCH` | `/api/bot/accounts/<phone>/mark-failed` | Toggle failure mark |

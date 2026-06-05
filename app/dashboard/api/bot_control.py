@@ -102,6 +102,7 @@ _BOT_CONNECT_TIMEOUT = 60  # seconds to wait for main.py to reach running state
 _MD_LINK_SYNC_TIMEOUT = 180.0  # wait inside bot after md.link IQ succeeds
 _MD_LINK_HTTP_TIMEOUT = 240.0  # overall API wait; includes login/startup time
 _BOT_COMMAND_HTTP_TIMEOUT = 90.0
+_IMPORT_ENV_VALUES = {"android", "smb_android", "ios", "smb_ios"}
 
 # Dict of running main.py processes keyed by phone string.
 # Replaces the old single _start_proc variable.
@@ -1261,7 +1262,8 @@ def import_account():
     Request body:
         {
           "lines":    ["phone,pk1,sk1,pk2,sk2,sixth", ...],
-          "agent_id": "pc"   ← optional; if provided, the import runs on that agent
+          "agent_id": "pc",  ← optional; if provided, the import runs on that agent
+          "env":      "android"  ← optional: android, smb_android, ios, smb_ios
         }
 
     When agent_id is given, the lines are dispatched to the agent via WebSocket
@@ -1274,6 +1276,12 @@ def import_account():
         return {"error": "lines (list) required"}, 400
 
     agent_id = str(body.get("agent_id", "")).strip() or None
+    import_env = str(body.get("env", "android")).strip() or "android"
+    if import_env not in _IMPORT_ENV_VALUES:
+        return {
+            "error": "invalid env",
+            "allowed": sorted(_IMPORT_ENV_VALUES),
+        }, 400
 
     # ── Remote import via agent ──────────────────────────────────────────────
     if agent_id:
@@ -1282,7 +1290,7 @@ def import_account():
         except ImportError:
             return {"error": "agent_gateway not available"}, 500
 
-        result = dispatch_command(agent_id, "import_account", {"lines": lines},
+        result = dispatch_command(agent_id, "import_account", {"lines": lines, "env": import_env},
                                   timeout=max(30.0, len(lines) * 30.0))
         if result is None:
             return {"error": f"Agent '{agent_id}' is not connected or did not respond"}, 503
@@ -1291,6 +1299,7 @@ def import_account():
         return {
             "imported": result.get("imported", 0),
             "total": result.get("total", len(lines)),
+            "env": result.get("env", import_env),
             "results": result.get("results", []),
         }
 
@@ -1303,7 +1312,7 @@ def import_account():
     for line in lines:
         try:
             proc = subprocess.run(
-                [sys.executable, str(script_path), line],
+                [sys.executable, str(script_path), line, "--env", import_env],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -1325,7 +1334,7 @@ def import_account():
             results.append({"line": line[:20] + "...", "ok": False, "stderr": str(exc)})
 
     success = sum(1 for r in results if r["ok"])
-    return {"imported": success, "total": len(results), "results": results}
+    return {"imported": success, "total": len(results), "env": import_env, "results": results}
 
 
 # ---------------------------------------------------------------------------
