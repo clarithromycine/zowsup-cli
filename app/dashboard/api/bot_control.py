@@ -58,7 +58,12 @@ _BOT_DRIVER_MODE: str = os.environ.get("BOT_DRIVER_MODE", "").strip().lower()
 # Agent routing helper
 # ---------------------------------------------------------------------------
 
-def _try_agent_command(phone: str, cmd_type: str, payload: dict) -> "dict | None":
+def _try_agent_command(
+    phone: str,
+    cmd_type: str,
+    payload: dict,
+    timeout: float | None = None,
+) -> "dict | None":
     """
     Dispatch *cmd_type* to the agent that manages *phone*.
 
@@ -76,7 +81,10 @@ def _try_agent_command(phone: str, cmd_type: str, payload: dict) -> "dict | None
             if _BOT_DRIVER_MODE == "agent":
                 raise RuntimeError(f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}")
             return None
-        result = dispatch_command(agent_id, cmd_type, payload)
+        if timeout is None:
+            result = dispatch_command(agent_id, cmd_type, payload)
+        else:
+            result = dispatch_command(agent_id, cmd_type, payload, timeout=timeout)
         return result
     except RuntimeError:
         raise
@@ -91,6 +99,8 @@ _qr_proc: "subprocess.Popen | None" = None
 _PID_FILE = Path("data") / "bot.pid"
 _BOT_STARTUP_TIMEOUT = 30  # seconds to wait for link-code to appear
 _BOT_CONNECT_TIMEOUT = 60  # seconds to wait for main.py to reach running state
+_MD_LINK_SYNC_TIMEOUT = 180.0  # wait inside bot after md.link IQ succeeds
+_MD_LINK_HTTP_TIMEOUT = 240.0  # overall API wait; includes login/startup time
 
 # Dict of running main.py processes keyed by phone string.
 # Replaces the old single _start_proc variable.
@@ -625,6 +635,90 @@ def post_bot_start():
 
 
 # ---------------------------------------------------------------------------
+# B.6b  POST /api/bot/md-link
+# ---------------------------------------------------------------------------
+
+@bot_bp.post("/md-link")
+@limiter.limit("5 per minute")
+def post_md_link():
+    """
+    Link a companion device by QR payload.
+
+    Body: {"phone": "27626947061", "qr_code": "https://wa.me/settings/linked_devices#..."}
+    The request returns only after md.link has succeeded and the follow-up
+    AccountSync post-pair flow has completed in ZowBotLayer.
+    """
+    body = request.get_json(silent=True) or {}
+    phone = str(body.get("phone", "")).strip().lstrip("+")
+    qr_code = str(body.get("qr_code", "")).strip()
+    if not phone:
+        return {"error": "phone required"}, 400
+    if not phone.isdigit() or not (7 <= len(phone) <= 15):
+        return {"error": "invalid phone number — digits only, 7-15 characters"}, 400
+    if not qr_code:
+        return {"error": "qr_code required"}, 400
+
+    http_timeout = _coerce_timeout(body.get("timeout"), _MD_LINK_HTTP_TIMEOUT, 30.0, 600.0)
+    sync_timeout = _coerce_timeout(body.get("sync_timeout"), _MD_LINK_SYNC_TIMEOUT, 30.0, 300.0)
+
+    payload = {
+        "phone": phone,
+        "qr_code": qr_code,
+        "timeout": http_timeout,
+        "sync_timeout": sync_timeout,
+    }
+
+    try:
+        agent_result = _try_agent_command(phone, "md_link", payload, timeout=http_timeout + 5.0)
+    except RuntimeError as exc:
+        return {"error": str(exc)}, 503
+    if agent_result is not None:
+        status = 200 if agent_result.get("ok") else 502
+        return agent_result, status
+    if _BOT_DRIVER_MODE == "agent":
+        return {"error": f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}"}, 503
+
+    start_result = _ensure_local_bot_started(phone)
+    if not start_result.get("ok"):
+        return {"error": start_result.get("error", "failed to start bot"), "phone": phone}, 502
+
+    try:
+        from app.dashboard.utils.md_link_queue import (
+            cancel_md_link_task,
+            enqueue_md_link_task,
+            wait_md_link_result,
+        )
+        task_id = enqueue_md_link_task(phone, qr_code, sync_timeout=sync_timeout)
+        result = wait_md_link_result(task_id, timeout=http_timeout)
+    except Exception as exc:
+        logger.exception("md-link queue failed")
+        return {"error": str(exc)}, 500
+
+    if result is None:
+        cancelled = cancel_md_link_task(task_id)
+        return {
+            "ok": False,
+            "error": "md.link did not finish within timeout",
+            "task_id": task_id,
+            "cancelled": cancelled,
+        }, 504
+
+    if not result.get("success"):
+        return {
+            "ok": False,
+            "task_id": task_id,
+            "error": result.get("detail") or "md.link failed",
+            "result": result.get("result") or {},
+        }, 502
+
+    return {
+        "ok": True,
+        "task_id": task_id,
+        **(result.get("result") or {}),
+    }
+
+
+# ---------------------------------------------------------------------------
 # B.7  GET /api/bot/start-stream
 # ---------------------------------------------------------------------------
 
@@ -718,6 +812,49 @@ def get_start_stream():
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _coerce_timeout(value, default: float, minimum: float, maximum: float) -> float:
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        timeout = default
+    return max(minimum, min(maximum, timeout))
+
+
+def _ensure_local_bot_started(phone: str) -> dict:
+    proc = _start_procs.get(phone)
+    if proc is not None and proc.poll() is None:
+        return {"ok": True, "pid": proc.pid, "phone": phone, "already_running": True}
+
+    status = read_status(phone=phone)
+    pid = status.get("pid")
+    if status.get("running") and pid and _pid_alive(pid):
+        return {"ok": True, "pid": pid, "phone": phone, "already_running": True}
+
+    script_path = _resolve_script("main.py")
+    if not script_path.exists():
+        return {"ok": False, "error": "script/main.py not found", "phone": phone}
+
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, str(script_path), phone],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+            cwd=str(Path.cwd()),
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+        )
+        _start_procs[phone] = proc
+        _write_pid_file(proc.pid)
+        _start_drain_thread(proc)
+        logger.info("Bot auto-started for md.link, PID=%s, phone=%s", proc.pid, phone)
+        return {"ok": True, "pid": proc.pid, "phone": phone}
+    except OSError as exc:
+        logger.error("Failed to auto-start script/main.py for md.link: %s", exc)
+        return {"ok": False, "error": str(exc), "phone": phone}
+
 
 def _start_drain_thread(proc: "subprocess.Popen") -> None:
     """Start a daemon thread that drains proc.stdout until the process exits.

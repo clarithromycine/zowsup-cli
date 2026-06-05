@@ -146,6 +146,11 @@ def _start_bot(phone: str) -> dict:
         except (ProcessLookupError, PermissionError):
             pass
 
+    with _bot_procs_lock:
+        proc = _bot_procs.get(phone)
+    if proc and proc.poll() is None:
+        return {"ok": True, "already_running": True, "pid": proc.pid, "phone": phone}
+
     script = ROOT / "script" / "main.py"
     if not script.exists():
         return {"ok": False, "error": "script/main.py not found"}
@@ -291,6 +296,49 @@ def _enqueue_send_task(payload: dict) -> dict:
         return {"ok": True, "task_id": task_id}
     except Exception as exc:
         logger.error("Failed to enqueue send task: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+def _md_link(payload: dict) -> dict:
+    phone = str(payload.get("phone", "")).strip().lstrip("+")
+    qr_code = str(payload.get("qr_code", "")).strip()
+    if not phone:
+        return {"ok": False, "error": "phone required"}
+    if not qr_code:
+        return {"ok": False, "error": "qr_code required"}
+
+    timeout = float(payload.get("timeout") or 240.0)
+    sync_timeout = float(payload.get("sync_timeout") or 180.0)
+    start_result = _start_bot(phone)
+    if not start_result.get("ok"):
+        return {"ok": False, "error": start_result.get("error", "failed to start bot"), "phone": phone}
+
+    try:
+        from app.dashboard.utils.md_link_queue import (
+            cancel_md_link_task,
+            enqueue_md_link_task,
+            wait_md_link_result,
+        )
+        task_id = enqueue_md_link_task(phone, qr_code, sync_timeout=sync_timeout)
+        result = wait_md_link_result(task_id, timeout=timeout)
+        if result is None:
+            cancelled = cancel_md_link_task(task_id)
+            return {
+                "ok": False,
+                "error": "md.link did not finish within timeout",
+                "task_id": task_id,
+                "cancelled": cancelled,
+            }
+        if not result.get("success"):
+            return {
+                "ok": False,
+                "task_id": task_id,
+                "error": result.get("detail") or "md.link failed",
+                "result": result.get("result") or {},
+            }
+        return {"ok": True, "task_id": task_id, **(result.get("result") or {})}
+    except Exception as exc:
+        logger.error("Failed to run md.link task: %s", exc)
         return {"ok": False, "error": str(exc)}
 
 
@@ -454,6 +502,8 @@ def command(data):
             result = {"phones": _phone_list()}
         elif cmd_type == "send_message":
             result = _enqueue_send_task(payload)
+        elif cmd_type == "md_link":
+            result = _md_link(payload)
         elif cmd_type == "import_account":
             lines = [str(l).strip() for l in payload.get("lines", []) if str(l).strip()]
             if not lines:

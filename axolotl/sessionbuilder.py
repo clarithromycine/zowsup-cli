@@ -258,3 +258,4 @@ class SessionBuilder:
                                       ratchetKey.getPublicKey(), identityKey.getPublicKey())
         except InvalidKeyException as e:
             raise AssertionError(e)
+    
