@@ -14,7 +14,7 @@
 #     zowsup-dashboard
 
 # ── Stage 1: builder ────────────────────────────────────────
-FROM python:3.11-slim AS builder
+FROM python:3.14.5 AS builder
 
 WORKDIR /app
 
@@ -28,7 +28,7 @@ RUN pip install --upgrade pip \
  && pip install --prefix=/install -r requirements.txt
 
 # ── Stage 2: runtime ────────────────────────────────────────
-FROM python:3.11-slim AS runtime
+FROM python:3.14.5 AS runtime
 
 WORKDIR /app
 
