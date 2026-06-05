@@ -4,6 +4,7 @@
 import asyncio
 import base64
 import configparser
+import hashlib
 import io
 import logging
 import mimetypes
@@ -79,6 +80,15 @@ from app.dashboard.bridge import dashboard as _db
 logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
+
+
+def _md_link_qr_meta(qr_code: str) -> dict:
+    value = qr_code or ""
+    return {
+        "qr_len": len(value),
+        "qr_sha": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12] if value else "",
+        "qr_url": value.startswith(("https://", "http://")),
+    }
 
 async def _qr_code_task(layer, interval):
     """Asyncio task replacing YowQrCodeThread."""
@@ -267,7 +277,20 @@ async def _md_link_queue_poll_task(layer, poll_interval: int = 1):
     md.link before the account has finished its normal login initialization.
     """
     try:
-        logger.debug("md.link queue poll task started (interval=%ds)", poll_interval)
+        try:
+            from app.dashboard.utils.md_link_queue import describe_md_link_ipc
+            ipc = describe_md_link_ipc()
+        except Exception as exc:
+            ipc = {"cwd": os.getcwd(), "queue_file": "unknown", "results_file": "unknown"}
+            logger.debug("md.link queue IPC diagnostics unavailable: %s", exc)
+        logger.info(
+            "md.link queue poll task started bot_id=%s interval=%ds cwd=%s queue_file=%s results_file=%s",
+            layer.bot.botId,
+            poll_interval,
+            ipc["cwd"],
+            ipc["queue_file"],
+            ipc["results_file"],
+        )
         while True:
             await asyncio.sleep(poll_interval)
             bot_id = layer.bot.botId or ""
@@ -283,17 +306,46 @@ async def _md_link_queue_poll_task(layer, poll_interval: int = 1):
 
             for task in tasks:
                 task_id = str(task.get("id", "?"))
+                task_start = time.time()
                 try:
                     qr_code = str(task.get("qr_code", "")).strip()
                     sync_timeout = float(task.get("sync_timeout") or 180.0)
+                    created_at = float(task.get("created_at") or 0)
+                    age = task_start - created_at if created_at else -1
+                    meta = _md_link_qr_meta(qr_code)
+                    logger.info(
+                        "md.link queue: task %s starting phone=%s bot_id=%s age=%.1fs "
+                        "sync_timeout=%.1fs connected=%s status=%s qr_len=%d qr_sha=%s qr_url=%s",
+                        task_id,
+                        phone,
+                        bot_id,
+                        age,
+                        sync_timeout,
+                        layer.isConnected,
+                        getattr(layer.bot, "status", None),
+                        meta["qr_len"],
+                        meta["qr_sha"],
+                        meta["qr_url"],
+                    )
                     if not qr_code:
                         raise ValueError("qr_code required")
                     result = await layer.execute_md_link_and_wait_sync(qr_code, sync_timeout=sync_timeout)
                     write_md_link_result(task_id, success=True, result=result)
-                    logger.info("md.link queue: task %s completed", task_id)
+                    logger.info(
+                        "md.link queue: task %s completed elapsed=%.1fs result_keys=%s",
+                        task_id,
+                        time.time() - task_start,
+                        ",".join(sorted(result.keys())) if isinstance(result, dict) else "",
+                    )
                 except Exception as exc:
                     write_md_link_result(task_id, success=False, detail=str(exc))
-                    logger.warning("md.link queue: task %s failed: %s", task_id, exc)
+                    logger.warning(
+                        "md.link queue: task %s failed elapsed=%.1fs error=%s",
+                        task_id,
+                        time.time() - task_start,
+                        exc,
+                        exc_info=True,
+                    )
     except asyncio.CancelledError:
         logger.debug("md.link queue poll task cancelled")
 
@@ -462,6 +514,19 @@ class ZowBotLayer(YowInterfaceLayer):
         The API treats md.link as successful only after on_get_conn_success in
         the AccountSyncNotification flow has completed.
         """
+        start = time.time()
+        meta = _md_link_qr_meta(qr_code)
+        self.logger.info(
+            "md.link sync start bot_id=%s connected=%s status=%s sync_timeout=%.1fs "
+            "qr_len=%d qr_sha=%s qr_url=%s",
+            self.bot.botId,
+            self.isConnected,
+            self.bot.status,
+            sync_timeout,
+            meta["qr_len"],
+            meta["qr_sha"],
+            meta["qr_url"],
+        )
         if not self.isConnected or self.bot.status != ZowBotStatus.STATUS_RUNNING:
             raise RuntimeError("bot is not initialized")
 
@@ -471,18 +536,44 @@ class ZowBotLayer(YowInterfaceLayer):
         self.getStack().setProp("pair-companion-jid", None)
 
         try:
+            command_start = time.time()
+            self.logger.info("md.link command executing bot_id=%s qr_sha=%s", self.bot.botId, meta["qr_sha"])
             result = await self.executeCommand("md.link", [qr_code], {})
+            self.logger.info(
+                "md.link command returned bot_id=%s retcode=%s elapsed=%.1fs result_keys=%s",
+                self.bot.botId,
+                result.get("retcode") if isinstance(result, dict) else None,
+                time.time() - command_start,
+                ",".join(sorted(result.keys())) if isinstance(result, dict) else "",
+            )
             if not isinstance(result, dict):
                 raise RuntimeError(f"md.link returned unexpected result: {result}")
             if result.get("retcode") != 0:
                 raise RuntimeError(result.get("msg") or "md.link failed")
 
             try:
+                self.logger.info(
+                    "md.link waiting for post-pair AccountSync bot_id=%s timeout=%.1fs",
+                    self.bot.botId,
+                    sync_timeout,
+                )
                 sync_result = await asyncio.wait_for(sync_future, timeout=sync_timeout)
             except asyncio.TimeoutError as exc:
+                self.logger.warning(
+                    "md.link post-pair AccountSync timeout bot_id=%s elapsed=%.1fs timeout=%.1fs",
+                    self.bot.botId,
+                    time.time() - start,
+                    sync_timeout,
+                )
                 raise RuntimeError(
                     f"post-pair AccountSync did not finish within {sync_timeout:.0f}s"
                 ) from exc
+            self.logger.info(
+                "md.link post-pair AccountSync completed bot_id=%s elapsed=%.1fs sync_keys=%s",
+                self.bot.botId,
+                time.time() - start,
+                ",".join(sorted(sync_result.keys())) if isinstance(sync_result, dict) else "",
+            )
             return {
                 **result,
                 "synced": True,
@@ -491,14 +582,25 @@ class ZowBotLayer(YowInterfaceLayer):
         finally:
             if self._mdLinkSyncFuture is sync_future:
                 self._mdLinkSyncFuture = None
+                self.logger.debug("md.link sync future cleared bot_id=%s elapsed=%.1fs", self.bot.botId, time.time() - start)
 
     def _complete_md_link_sync(self, companion_jid: str, error: str | None = None) -> None:
         future = self._mdLinkSyncFuture
         if future is None or future.done():
+            self.logger.info(
+                "md.link sync completion ignored bot_id=%s companion_jid=%s has_future=%s future_done=%s error=%s",
+                self.bot.botId,
+                companion_jid,
+                future is not None,
+                future.done() if future is not None else None,
+                error,
+            )
             return
         if error:
+            self.logger.warning("md.link sync completing with error bot_id=%s companion_jid=%s error=%s", self.bot.botId, companion_jid, error)
             future.set_exception(RuntimeError(error))
         else:
+            self.logger.info("md.link sync completing bot_id=%s companion_jid=%s", self.bot.botId, companion_jid)
             future.set_result({"companion_jid": companion_jid})
                         
 
@@ -646,9 +748,17 @@ class ZowBotLayer(YowInterfaceLayer):
             self.logger.info("Notification: Received a AccountSync Notification")            
             companionJid = self.getStack().getProp("pair-companion-jid")
             if companionJid is None :
+                self.logger.debug("AccountSync notification ignored: no pending md.link companion jid")
                 return
+            self.logger.info(
+                "md.link AccountSync notification matched companion_jid=%s pending_future=%s db=%s",
+                companionJid,
+                self._mdLinkSyncFuture is not None and not self._mdLinkSyncFuture.done(),
+                self.db is not None,
+            )
             entity = GetKeysIqProtocolEntity([companionJid],_id=self.bot.idType)        
             async def on_get_encrypt_success(entity, original_iq_entity):
+                self.logger.info("md.link AccountSync encryption keys received companion_jid=%s", companionJid)
 
                 entity = ProtocolMessageProtocolEntity(protocol_attr=ProtocolAttributes(                    
                     type = ProtocolAttributes.TYPE_INITIAL_SECURITY_NOTIFICATION_SETTING_SYNC,
@@ -662,6 +772,7 @@ class ZowBotLayer(YowInterfaceLayer):
 
                 await self.toLower(entity)                
                 sync_keys = self.generateAppStateSyncKeys(10)
+                self.logger.info("md.link AccountSync generated app-state sync keys companion_jid=%s count=%d", companionJid, len(sync_keys))
 
                 if self.db:
                     self.db._store.addAppStateKeys(sync_keys)
@@ -681,6 +792,7 @@ class ZowBotLayer(YowInterfaceLayer):
                 await asyncio.sleep(3)           
 
                 async def on_get_conn_success(conn_entity, original_iq_entity):   
+                    self.logger.info("md.link AccountSync media connection success companion_jid=%s", companionJid)
 
                     hs = HistorySync(conn_entity,companionJid)
 
@@ -704,6 +816,7 @@ class ZowBotLayer(YowInterfaceLayer):
                 
 
                     if not self.db:
+                        self.logger.info("md.link AccountSync completing without db companion_jid=%s", companionJid)
                         self._complete_md_link_sync(companionJid)
                         return 
                     
@@ -737,18 +850,30 @@ class ZowBotLayer(YowInterfaceLayer):
                     )
 
                     await self.toLower(entity)
+                    self.logger.info("md.link AccountSync app-state patches sent companion_jid=%s", companionJid)
                     self._complete_md_link_sync(companionJid)
 
                 def on_get_conn_error(entity, original_iq_entity):  
-                    self.logger.error("get conn error")
+                    self.logger.error(
+                        "md.link AccountSync media connection error companion_jid=%s entity=%s",
+                        companionJid,
+                        type(entity).__name__,
+                    )
                     self._complete_md_link_sync(companionJid, error="get media connection error")
 
                 conniq = RequestMediaConnIqProtocolEntity()
+                self.logger.info("md.link AccountSync requesting media connection companion_jid=%s", companionJid)
                 await self._sendIq(conniq,on_get_conn_success,on_get_conn_error)
 
             def on_get_encrypt_error(entity, on_get_encrypt_error):
-                self.logger.error("error get encrypt")
+                self.logger.error(
+                    "md.link AccountSync encryption key request error companion_jid=%s entity=%s",
+                    companionJid,
+                    type(entity).__name__,
+                )
+                self._complete_md_link_sync(companionJid, error="get encrypt error")
 
+            self.logger.info("md.link AccountSync requesting encryption keys companion_jid=%s", companionJid)
             await self._sendIq(entity, on_get_encrypt_success, on_get_encrypt_error)                 
 
         if isinstance(entity,LinkCodeCompanionRegNotificationProtocolEntity):

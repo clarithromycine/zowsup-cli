@@ -59,6 +59,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agent")
 
+
+def _md_link_qr_meta(qr_code: str) -> dict:
+    value = qr_code or ""
+    return {
+        "qr_len": len(value),
+        "qr_sha": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12] if value else "",
+        "qr_url": value.startswith(("https://", "http://")),
+    }
+
 # ── Dependency check ──────────────────────────────────────────────────────────
 try:
     import socketio as sio_lib
@@ -172,12 +181,19 @@ def _start_bot(phone: str, proxy: Optional[str] = None) -> dict:
         try:
             os.kill(status["pid"], 0)   # check alive
             if proxy:
+                logger.info(
+                    "Bot already running from status phone=%s PID=%s proxy_requested=True status=%s",
+                    phone,
+                    status["pid"],
+                    status,
+                )
                 return {
                     "ok": False,
                     "error": "proxy can only be applied when starting the bot; stop it first",
                     "phone": phone,
                     "already_running": True,
                 }
+            logger.info("Bot already running from status phone=%s PID=%s status=%s", phone, status["pid"], status)
             return {"ok": True, "already_running": True, "pid": status["pid"], "phone": phone}
         except (ProcessLookupError, PermissionError):
             pass
@@ -186,16 +202,19 @@ def _start_bot(phone: str, proxy: Optional[str] = None) -> dict:
         proc = _bot_procs.get(phone)
     if proc and proc.poll() is None:
         if proxy:
+            logger.info("Bot already running in agent registry phone=%s PID=%s proxy_requested=True", phone, proc.pid)
             return {
                 "ok": False,
                 "error": "proxy can only be applied when starting the bot; stop it first",
                 "phone": phone,
                 "already_running": True,
             }
+        logger.info("Bot already running in agent registry phone=%s PID=%s", phone, proc.pid)
         return {"ok": True, "already_running": True, "pid": proc.pid, "phone": phone}
 
     script = ROOT / "script" / "main.py"
     if not script.exists():
+        logger.warning("script/main.py not found phone=%s script=%s cwd=%s", phone, script, os.getcwd())
         return {"ok": False, "error": "script/main.py not found"}
 
     with _bot_procs_lock:
@@ -209,6 +228,13 @@ def _start_bot(phone: str, proxy: Optional[str] = None) -> dict:
         args = [sys.executable, str(script), phone]
         if proxy and proxy != "DIRECT":
             args.extend(["--proxy", proxy])
+        logger.info(
+            "Starting bot for md.link/agent phone=%s script=%s cwd=%s proxy=%s",
+            phone,
+            script,
+            ROOT,
+            bool(proxy and proxy != "DIRECT"),
+        )
         proc = subprocess.Popen(
             args,
             stdout=subprocess.PIPE,
@@ -346,6 +372,7 @@ def _enqueue_send_task(payload: dict) -> dict:
 
 
 def _md_link(payload: dict) -> dict:
+    request_start = time.time()
     phone = str(payload.get("phone", "")).strip().lstrip("+")
     qr_code = str(payload.get("qr_code", "")).strip()
     if not phone:
@@ -360,20 +387,65 @@ def _md_link(payload: dict) -> dict:
 
     timeout = float(payload.get("timeout") or 240.0)
     sync_timeout = float(payload.get("sync_timeout") or 180.0)
+    meta = _md_link_qr_meta(qr_code)
+    logger.info(
+        "md.link agent request phone=%s timeout=%.1fs sync_timeout=%.1fs proxy=%s cwd=%s "
+        "queue_root=%s qr_len=%d qr_sha=%s qr_url=%s",
+        phone,
+        timeout,
+        sync_timeout,
+        bool(proxy and proxy != "DIRECT"),
+        os.getcwd(),
+        ROOT,
+        meta["qr_len"],
+        meta["qr_sha"],
+        meta["qr_url"],
+    )
     start_result = _start_bot(phone, proxy=proxy)
+    logger.info(
+        "md.link agent bot start checked phone=%s ok=%s pid=%s already_running=%s elapsed=%.1fs",
+        phone,
+        start_result.get("ok"),
+        start_result.get("pid"),
+        start_result.get("already_running"),
+        time.time() - request_start,
+    )
     if not start_result.get("ok"):
         return {"ok": False, "error": start_result.get("error", "failed to start bot"), "phone": phone}
 
+    task_id = None
     try:
         from app.dashboard.utils.md_link_queue import (
             cancel_md_link_task,
+            describe_md_link_ipc,
             enqueue_md_link_task,
             wait_md_link_result,
         )
+        ipc = describe_md_link_ipc()
         task_id = enqueue_md_link_task(phone, qr_code, sync_timeout=sync_timeout)
+        logger.info(
+            "md.link agent task queued phone=%s task_id=%s pid=%s already_running=%s "
+            "timeout=%.1fs sync_timeout=%.1fs queue_file=%s results_file=%s",
+            phone,
+            task_id,
+            start_result.get("pid"),
+            start_result.get("already_running"),
+            timeout,
+            sync_timeout,
+            ipc["queue_file"],
+            ipc["results_file"],
+        )
         result = wait_md_link_result(task_id, timeout=timeout)
         if result is None:
             cancelled = cancel_md_link_task(task_id)
+            logger.warning(
+                "md.link agent task timed out phone=%s task_id=%s cancelled=%s timeout=%.1fs elapsed=%.1fs",
+                phone,
+                task_id,
+                cancelled,
+                timeout,
+                time.time() - request_start,
+            )
             return {
                 "ok": False,
                 "error": "md.link did not finish within timeout",
@@ -381,15 +453,29 @@ def _md_link(payload: dict) -> dict:
                 "cancelled": cancelled,
             }
         if not result.get("success"):
+            logger.warning(
+                "md.link agent task failed phone=%s task_id=%s detail=%s elapsed=%.1fs",
+                phone,
+                task_id,
+                str(result.get("detail") or "")[:200],
+                time.time() - request_start,
+            )
             return {
                 "ok": False,
                 "task_id": task_id,
                 "error": result.get("detail") or "md.link failed",
                 "result": result.get("result") or {},
             }
+        logger.info(
+            "md.link agent task succeeded phone=%s task_id=%s elapsed=%.1fs result_keys=%s",
+            phone,
+            task_id,
+            time.time() - request_start,
+            ",".join(sorted((result.get("result") or {}).keys())),
+        )
         return {"ok": True, "task_id": task_id, **(result.get("result") or {})}
     except Exception as exc:
-        logger.error("Failed to run md.link task: %s", exc)
+        logger.error("Failed to run md.link task phone=%s task_id=%s error=%s", phone, task_id, exc, exc_info=True)
         return {"ok": False, "error": str(exc)}
 
 
