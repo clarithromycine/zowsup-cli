@@ -40,22 +40,3 @@ services:
       retries: 3
       start_period: 15s
 
-  # ── Frontend Nginx ─────────────────────────────────────────
-  frontend:
-    build:
-      context: ./app/dashboard/frontend
-      dockerfile: Dockerfile.frontend
-    image: zowsup-dashboard-frontend:latest
-    container_name: zowsup-frontend
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      backend:
-        condition: service_healthy
-    volumes:
-      # Optional: mount custom Nginx config or TLS certs
-      # - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      # - ./nginx/certs:/etc/nginx/certs:ro
-      []
