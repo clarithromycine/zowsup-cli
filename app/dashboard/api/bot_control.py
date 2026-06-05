@@ -968,7 +968,7 @@ def _ensure_local_bot_started(phone: str, proxy: str | None = None) -> dict:
         return {"ok": False, "error": "script/main.py not found", "phone": phone}
 
     try:
-        args = [sys.executable, str(script_path), phone]
+        args = [sys.executable, str(script_path), phone, "--debug"]
         if proxy and proxy != "DIRECT":
             args.extend(["--proxy", proxy])
         proc = subprocess.Popen(
