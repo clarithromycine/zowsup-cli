@@ -137,12 +137,47 @@ def _phone_list() -> list[str]:
 
 # ── Bot management ────────────────────────────────────────────────────────────
 
-def _start_bot(phone: str) -> dict:
+def _normalize_proxy_param(value) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        host = str(value.get("host", "")).strip()
+        port = str(value.get("port", "")).strip()
+        username = str(value.get("username", "")).strip()
+        password = str(value.get("password", "")).strip()
+        if not all([host, port, username, password]):
+            raise ValueError("proxy object requires host, port, username and password")
+        value = f"{host}:{port}:{username}:{password}"
+
+    proxy = str(value).strip()
+    if not proxy:
+        return None
+    if proxy.upper() == "DIRECT":
+        return "DIRECT"
+
+    parts = proxy.split(":")
+    if len(parts) != 4 or not all(parts):
+        raise ValueError("proxy must be DIRECT or host:port:username:password")
+    try:
+        int(parts[1])
+    except ValueError as exc:
+        raise ValueError("proxy port must be an integer") from exc
+    return proxy
+
+
+def _start_bot(phone: str, proxy: Optional[str] = None) -> dict:
     from app.dashboard.utils.bot_status import read_status
     status = read_status(phone=phone)
     if status.get("running") and status.get("pid"):
         try:
             os.kill(status["pid"], 0)   # check alive
+            if proxy:
+                return {
+                    "ok": False,
+                    "error": "proxy can only be applied when starting the bot; stop it first",
+                    "phone": phone,
+                    "already_running": True,
+                }
             return {"ok": True, "already_running": True, "pid": status["pid"], "phone": phone}
         except (ProcessLookupError, PermissionError):
             pass
@@ -150,6 +185,13 @@ def _start_bot(phone: str) -> dict:
     with _bot_procs_lock:
         proc = _bot_procs.get(phone)
     if proc and proc.poll() is None:
+        if proxy:
+            return {
+                "ok": False,
+                "error": "proxy can only be applied when starting the bot; stop it first",
+                "phone": phone,
+                "already_running": True,
+            }
         return {"ok": True, "already_running": True, "pid": proc.pid, "phone": phone}
 
     script = ROOT / "script" / "main.py"
@@ -164,8 +206,11 @@ def _start_bot(phone: str) -> dict:
             except OSError:
                 pass
     try:
+        args = [sys.executable, str(script), phone]
+        if proxy and proxy != "DIRECT":
+            args.extend(["--proxy", proxy])
         proc = subprocess.Popen(
-            [sys.executable, str(script), phone],
+            args,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -308,9 +353,14 @@ def _md_link(payload: dict) -> dict:
     if not qr_code:
         return {"ok": False, "error": "qr_code required"}
 
+    try:
+        proxy = _normalize_proxy_param(payload.get("proxy"))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
     timeout = float(payload.get("timeout") or 240.0)
     sync_timeout = float(payload.get("sync_timeout") or 180.0)
-    start_result = _start_bot(phone)
+    start_result = _start_bot(phone, proxy=proxy)
     if not start_result.get("ok"):
         return {"ok": False, "error": start_result.get("error", "failed to start bot"), "phone": phone}
 

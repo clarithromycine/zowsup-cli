@@ -646,7 +646,11 @@ def post_md_link():
     """
     Link a companion device by QR payload.
 
-    Body: {"phone": "27626947061", "qr_code": "https://wa.me/settings/linked_devices#..."}
+    Body: {
+      "phone": "27626947061",
+      "qr_code": "https://wa.me/settings/linked_devices#...",
+      "proxy": "host:port:username:password"  # optional; or "DIRECT"
+    }
     The request returns only after md.link has succeeded and the follow-up
     AccountSync post-pair flow has completed in ZowBotLayer.
     """
@@ -662,12 +666,17 @@ def post_md_link():
 
     http_timeout = _coerce_timeout(body.get("timeout"), _MD_LINK_HTTP_TIMEOUT, 30.0, 600.0)
     sync_timeout = _coerce_timeout(body.get("sync_timeout"), _MD_LINK_SYNC_TIMEOUT, 30.0, 300.0)
+    try:
+        proxy = _normalize_proxy_param(body.get("proxy"))
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
 
     payload = {
         "phone": phone,
         "qr_code": qr_code,
         "timeout": http_timeout,
         "sync_timeout": sync_timeout,
+        "proxy": proxy,
     }
 
     try:
@@ -675,14 +684,20 @@ def post_md_link():
     except RuntimeError as exc:
         return {"error": str(exc)}, 503
     if agent_result is not None:
-        status = 200 if agent_result.get("ok") else 502
+        if agent_result.get("ok"):
+            status = 200
+        elif agent_result.get("already_running"):
+            status = 409
+        else:
+            status = 502
         return agent_result, status
     if _BOT_DRIVER_MODE == "agent":
         return {"error": f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}"}, 503
 
-    start_result = _ensure_local_bot_started(phone)
+    start_result = _ensure_local_bot_started(phone, proxy=proxy)
     if not start_result.get("ok"):
-        return {"error": start_result.get("error", "failed to start bot"), "phone": phone}, 502
+        status = 409 if start_result.get("already_running") else 502
+        return {"error": start_result.get("error", "failed to start bot"), "phone": phone}, status
 
     try:
         from app.dashboard.utils.md_link_queue import (
@@ -896,14 +911,56 @@ def _coerce_timeout(value, default: float, minimum: float, maximum: float) -> fl
     return max(minimum, min(maximum, timeout))
 
 
-def _ensure_local_bot_started(phone: str) -> dict:
+def _normalize_proxy_param(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        host = str(value.get("host", "")).strip()
+        port = str(value.get("port", "")).strip()
+        username = str(value.get("username", "")).strip()
+        password = str(value.get("password", "")).strip()
+        if not all([host, port, username, password]):
+            raise ValueError("proxy object requires host, port, username and password")
+        value = f"{host}:{port}:{username}:{password}"
+
+    proxy = str(value).strip()
+    if not proxy:
+        return None
+    if proxy.upper() == "DIRECT":
+        return "DIRECT"
+
+    parts = proxy.split(":")
+    if len(parts) != 4 or not all(parts):
+        raise ValueError("proxy must be DIRECT or host:port:username:password")
+    try:
+        int(parts[1])
+    except ValueError as exc:
+        raise ValueError("proxy port must be an integer") from exc
+    return proxy
+
+
+def _ensure_local_bot_started(phone: str, proxy: str | None = None) -> dict:
     proc = _start_procs.get(phone)
     if proc is not None and proc.poll() is None:
+        if proxy:
+            return {
+                "ok": False,
+                "error": "proxy can only be applied when starting the bot; stop it first",
+                "phone": phone,
+                "already_running": True,
+            }
         return {"ok": True, "pid": proc.pid, "phone": phone, "already_running": True}
 
     status = read_status(phone=phone)
     pid = status.get("pid")
     if status.get("running") and pid and _pid_alive(pid):
+        if proxy:
+            return {
+                "ok": False,
+                "error": "proxy can only be applied when starting the bot; stop it first",
+                "phone": phone,
+                "already_running": True,
+            }
         return {"ok": True, "pid": pid, "phone": phone, "already_running": True}
 
     script_path = _resolve_script("main.py")
@@ -911,8 +968,11 @@ def _ensure_local_bot_started(phone: str) -> dict:
         return {"ok": False, "error": "script/main.py not found", "phone": phone}
 
     try:
+        args = [sys.executable, str(script_path), phone]
+        if proxy and proxy != "DIRECT":
+            args.extend(["--proxy", proxy])
         proc = subprocess.Popen(
-            [sys.executable, str(script_path), phone],
+            args,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -924,7 +984,7 @@ def _ensure_local_bot_started(phone: str) -> dict:
         _start_procs[phone] = proc
         _write_pid_file(proc.pid)
         _start_drain_thread(proc)
-        logger.info("Bot auto-started for md.link, PID=%s, phone=%s", proc.pid, phone)
+        logger.info("Bot auto-started for md.link, PID=%s, phone=%s, proxy=%s", proc.pid, phone, bool(proxy and proxy != "DIRECT"))
         return {"ok": True, "pid": proc.pid, "phone": phone}
     except OSError as exc:
         logger.error("Failed to auto-start script/main.py for md.link: %s", exc)
