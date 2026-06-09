@@ -32,14 +32,15 @@ class WmexQueryIqProtocolEntity(IqProtocolEntity):
 
     @staticmethod
     def loadDict():
-        with open("data/argo_dict.json", encoding='utf8') as f:            
-            WmexQueryIqProtocolEntity._queryIdMap =json.loads(f.read())
-
+        with open("data/mex_argo_dict.json", encoding='utf8') as f:            
+            rawJson = json.loads(f.read())
+            WmexQueryIqProtocolEntity._queryIdMap = {k: str(v["doc_id"]) for k, v in rawJson.items()}
+            
     def __str__(self):
         out = super().__str__()
-        out += "query_name: %s\n" % self.query_name
-        out += "query_id: %s\n" % self.query_id
-        out += "query_obj: %s\n" % json.dumps(self.query_obj)
+        out += "query_name: {}\n".format(self.query_name)
+        out += "query_id: {}\n".format(self.query_id)
+        out += "query_obj: {}\n".format(json.dumps(self.query_obj))
         return out
 
     def toProtocolTreeNode(self) -> Any:

@@ -9,8 +9,6 @@ from axolotl.ecc.djbec import DjbECPublicKey
 import binascii
 import sys
 
-
-
 class ResultGetKeysIqProtocolEntity(ResultIqProtocolEntity):
     """
     <iq type="result" from="s.whatsapp.net" id="3">
@@ -203,7 +201,7 @@ class MissingParametersException(Exception):
             parameters = list(parameters)
         assert len(parameters) > 0
         for p in parameters:
-            assert p in self.__PARAMS, "%s is unrecognized param" % p
+            assert p in self.__PARAMS, "{} is unrecognized param".format(p)
 
         self._parameters = parameters
 

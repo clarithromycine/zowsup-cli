@@ -16,7 +16,6 @@ class IqProtocolEntity(ProtocolEntity):
     def __init__(self, xmlns = None, _id = None, _type = None, to = None, _from = None,target=None,smax_id=None) -> None:
         super().__init__("iq")
 
-        #assert _type in self.__class__.TYPES, "Iq of type %s is not implemented, can accept only (%s)" % (_type," | ".join(self.__class__.TYPES))
         assert not to or not _from, "Can't set from and to at the same time"
 
         if _id is None:
@@ -81,17 +80,17 @@ class IqProtocolEntity(ProtocolEntity):
 
     def __str__(self):
         out  = "Iq:\n"
-        out += "ID: %s\n" % self._id
-        out += "Type: %s\n" % self._type
+        out += "ID: {}\n".format(self._id)
+        out += "Type: {}\n".format(self._type)
         if self.xmlns:
-            out += "xmlns: %s\n" % self.xmlns
+            out += "xmlns: {}\n".format(self.xmlns)
         if self.to:
-            out += "to: %s\n" % self.to
+            out += "to: {}\n".format(self.to)
         elif self._from:
-            out += "from: %s\n" % self._from
+            out += "from: {}\n".format(self._from)
 
         if self.smax_id:
-            out += "smax_id: %s\n" % self.smax_id
+            out += "smax_id: {}\n".format(self.smax_id)
         return out
 
     @staticmethod

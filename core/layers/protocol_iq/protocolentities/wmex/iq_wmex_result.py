@@ -40,7 +40,7 @@ class WmexResultIqProtocolEntity(IqProtocolEntity):
 
     def __str__(self):
         out = super().__str__()
-        out += "result_obj: %s\n" % (json.dumps(self.result_obj) if self.result_type=="json" else str(self.result_obj))
+        out += "result_obj: {}\n".format(json.dumps(self.result_obj) if self.result_type=="json" else str(self.result_obj))
         return out
 
     @staticmethod
@@ -57,7 +57,7 @@ class WmexResultIqProtocolEntity(IqProtocolEntity):
                 if query_name=="BizIntegrityQuery":
                     data= data.replace(b"\x01\x02\x02",b"\x01\x00\x02") #little temp patch to ignore some weird fields in integrity_tags formats
                 if query_name is not None:
-                    ArgoMessageDecoder.setSchemaFile("data/argo-wire-type-store.argo")
+                    ArgoMessageDecoder.setSchemaFile("data/whatsapp-android-mex_argo_wire_types.argo")
                     obj = ArgoMessageDecoder.decodeMessage(query_name,data)                    
                     res = json.dumps(obj,cls=BytesEncoder)                   
                                     

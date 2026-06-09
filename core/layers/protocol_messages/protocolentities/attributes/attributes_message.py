@@ -108,7 +108,6 @@ class MessageAttributes:
         if self._interactive is not None:
             attrs.append(("interactive", self.interactive))          
 
-
         if self._reaction is not None:
             attrs.append(("reaction", self.reaction))                        
 
@@ -120,7 +119,7 @@ class MessageAttributes:
             attrs.append(("fromMe", self.fromMe))
             attrs.append(("to", self.to))
 
-        return "[%s]" % " ".join(map(lambda item: "%s=%s" % item, attrs))
+        return "[{}]".format(" ".join(map(lambda item: "{}={}".format(*item), attrs)))
 
 
 
