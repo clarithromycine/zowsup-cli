@@ -58,7 +58,12 @@ _BOT_DRIVER_MODE: str = os.environ.get("BOT_DRIVER_MODE", "").strip().lower()
 # Agent routing helper
 # ---------------------------------------------------------------------------
 
-def _try_agent_command(phone: str, cmd_type: str, payload: dict) -> "dict | None":
+def _try_agent_command(
+    phone: str,
+    cmd_type: str,
+    payload: dict,
+    timeout: float | None = None,
+) -> "dict | None":
     """
     Dispatch *cmd_type* to the agent that manages *phone*.
 
@@ -68,6 +73,7 @@ def _try_agent_command(phone: str, cmd_type: str, payload: dict) -> "dict | None
     - ""       → attempt if an agent manages the phone, else return None
     """
     if _BOT_DRIVER_MODE == "local":
+        logger.debug("Agent dispatch skipped by BOT_DRIVER_MODE=local command=%s phone=%s", cmd_type, phone)
         return None
     try:
         from app.dashboard.api.agent_gateway import get_agent_for_phone, dispatch_command
@@ -75,8 +81,30 @@ def _try_agent_command(phone: str, cmd_type: str, payload: dict) -> "dict | None
         if agent_id is None:
             if _BOT_DRIVER_MODE == "agent":
                 raise RuntimeError(f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}")
+            logger.debug("No agent manages phone=%s for command=%s; using local fallback", phone, cmd_type)
             return None
-        result = dispatch_command(agent_id, cmd_type, payload)
+        start = time.time()
+        logger.info(
+            "Dispatching agent command command=%s phone=%s agent_id=%s timeout=%s",
+            cmd_type,
+            phone,
+            agent_id,
+            f"{timeout:.1f}s" if timeout is not None else "default",
+        )
+        if timeout is None:
+            result = dispatch_command(agent_id, cmd_type, payload)
+        else:
+            result = dispatch_command(agent_id, cmd_type, payload, timeout=timeout)
+        logger.info(
+            "Agent command returned command=%s phone=%s agent_id=%s handled=%s ok=%s elapsed=%.1fs result_keys=%s",
+            cmd_type,
+            phone,
+            agent_id,
+            result is not None,
+            result.get("ok") if isinstance(result, dict) else None,
+            time.time() - start,
+            ",".join(sorted(result.keys())) if isinstance(result, dict) else "",
+        )
         return result
     except RuntimeError:
         raise
@@ -91,10 +119,23 @@ _qr_proc: "subprocess.Popen | None" = None
 _PID_FILE = Path("data") / "bot.pid"
 _BOT_STARTUP_TIMEOUT = 30  # seconds to wait for link-code to appear
 _BOT_CONNECT_TIMEOUT = 60  # seconds to wait for main.py to reach running state
+_MD_LINK_SYNC_TIMEOUT = 180.0  # wait inside bot after md.link IQ succeeds
+_MD_LINK_HTTP_TIMEOUT = 240.0  # overall API wait; includes login/startup time
+_BOT_COMMAND_HTTP_TIMEOUT = 90.0
+_IMPORT_ENV_VALUES = {"android", "smb_android", "ios", "smb_ios"}
 
 # Dict of running main.py processes keyed by phone string.
 # Replaces the old single _start_proc variable.
 _start_procs: "dict[str, subprocess.Popen]" = {}
+
+
+def _md_link_qr_meta(qr_code: str) -> dict:
+    value = qr_code or ""
+    return {
+        "qr_len": len(value),
+        "qr_sha": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12] if value else "",
+        "qr_url": value.startswith(("https://", "http://")),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +666,261 @@ def post_bot_start():
 
 
 # ---------------------------------------------------------------------------
+# B.6b  POST /api/bot/md-link
+# ---------------------------------------------------------------------------
+
+@bot_bp.post("/md-link")
+@limiter.limit("5 per minute")
+def post_md_link():
+    """
+    Link a companion device by QR payload.
+
+    Body: {
+      "phone": "27626947061",
+      "qr_code": "https://wa.me/settings/linked_devices#...",
+      "proxy": "host:port:username:password"  # optional; or "DIRECT"
+    }
+    The request returns only after md.link has succeeded and the follow-up
+    AccountSync post-pair flow has completed in ZowBotLayer.
+    """
+    request_start = time.time()
+    body = request.get_json(silent=True) or {}
+    phone = str(body.get("phone", "")).strip().lstrip("+")
+    qr_code = str(body.get("qr_code", "")).strip()
+    if not phone:
+        return {"error": "phone required"}, 400
+    if not phone.isdigit() or not (7 <= len(phone) <= 15):
+        return {"error": "invalid phone number — digits only, 7-15 characters"}, 400
+    if not qr_code:
+        return {"error": "qr_code required"}, 400
+
+    http_timeout = _coerce_timeout(body.get("timeout"), _MD_LINK_HTTP_TIMEOUT, 30.0, 600.0)
+    sync_timeout = _coerce_timeout(body.get("sync_timeout"), _MD_LINK_SYNC_TIMEOUT, 30.0, 300.0)
+    try:
+        proxy = _normalize_proxy_param(body.get("proxy"))
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    qr_meta = _md_link_qr_meta(qr_code)
+    logger.info(
+        "md-link request received phone=%s remote=%s timeout_requested=%r http_timeout=%.1fs "
+        "sync_timeout_requested=%r sync_timeout=%.1fs driver_mode=%s proxy=%s cwd=%s "
+        "qr_len=%d qr_sha=%s qr_url=%s",
+        phone,
+        request.headers.get("X-Forwarded-For", request.remote_addr),
+        body.get("timeout"),
+        http_timeout,
+        body.get("sync_timeout"),
+        sync_timeout,
+        _BOT_DRIVER_MODE or "auto",
+        bool(proxy and proxy != "DIRECT"),
+        os.getcwd(),
+        qr_meta["qr_len"],
+        qr_meta["qr_sha"],
+        qr_meta["qr_url"],
+    )
+
+    payload = {
+        "phone": phone,
+        "qr_code": qr_code,
+        "timeout": http_timeout,
+        "sync_timeout": sync_timeout,
+        "proxy": proxy,
+    }
+
+    try:
+        agent_result = _try_agent_command(phone, "md_link", payload, timeout=http_timeout + 5.0)
+    except RuntimeError as exc:
+        logger.warning("md-link agent routing failed phone=%s error=%s", phone, exc)
+        return {"error": str(exc)}, 503
+    if agent_result is not None:
+        if agent_result.get("ok"):
+            status = 200
+        elif agent_result.get("already_running"):
+            status = 409
+        else:
+            status = 502
+        logger.info(
+            "md-link returning agent result phone=%s status=%s ok=%s task_id=%s elapsed=%.1fs error=%s",
+            phone,
+            status,
+            agent_result.get("ok"),
+            agent_result.get("task_id"),
+            time.time() - request_start,
+            str(agent_result.get("error") or "")[:200],
+        )
+        return agent_result, status
+    if _BOT_DRIVER_MODE == "agent":
+        logger.warning("md-link no agent manages phone=%s while BOT_DRIVER_MODE=agent", phone)
+        return {"error": f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}"}, 503
+
+    start_result = _ensure_local_bot_started(phone, proxy=proxy)
+    logger.info(
+        "md-link local bot start checked phone=%s ok=%s pid=%s already_running=%s elapsed=%.1fs",
+        phone,
+        start_result.get("ok"),
+        start_result.get("pid"),
+        start_result.get("already_running"),
+        time.time() - request_start,
+    )
+    if not start_result.get("ok"):
+        status = 409 if start_result.get("already_running") else 502
+        logger.warning(
+            "md-link local bot start failed phone=%s status=%s error=%s elapsed=%.1fs",
+            phone,
+            status,
+            start_result.get("error"),
+            time.time() - request_start,
+        )
+        return {"error": start_result.get("error", "failed to start bot"), "phone": phone}, status
+
+    task_id = None
+    try:
+        from app.dashboard.utils.md_link_queue import (
+            cancel_md_link_task,
+            describe_md_link_ipc,
+            enqueue_md_link_task,
+            wait_md_link_result,
+        )
+        ipc = describe_md_link_ipc()
+        task_id = enqueue_md_link_task(phone, qr_code, sync_timeout=sync_timeout)
+        logger.info(
+            "md-link local task queued phone=%s task_id=%s pid=%s already_running=%s "
+            "http_timeout=%.1fs sync_timeout=%.1fs queue_file=%s results_file=%s",
+            phone,
+            task_id,
+            start_result.get("pid"),
+            start_result.get("already_running"),
+            http_timeout,
+            sync_timeout,
+            ipc["queue_file"],
+            ipc["results_file"],
+        )
+        result = wait_md_link_result(task_id, timeout=http_timeout)
+    except Exception as exc:
+        logger.exception("md-link queue failed phone=%s task_id=%s", phone, task_id)
+        return {"error": str(exc)}, 500
+
+    if result is None:
+        cancelled = cancel_md_link_task(task_id)
+        logger.warning(
+            "md-link local task timed out phone=%s task_id=%s cancelled=%s http_timeout=%.1fs elapsed=%.1fs",
+            phone,
+            task_id,
+            cancelled,
+            http_timeout,
+            time.time() - request_start,
+        )
+        return {
+            "ok": False,
+            "error": "md.link did not finish within timeout",
+            "task_id": task_id,
+            "cancelled": cancelled,
+        }, 504
+
+    if not result.get("success"):
+        logger.warning(
+            "md-link local task failed phone=%s task_id=%s detail=%s elapsed=%.1fs",
+            phone,
+            task_id,
+            str(result.get("detail") or "")[:200],
+            time.time() - request_start,
+        )
+        return {
+            "ok": False,
+            "task_id": task_id,
+            "error": result.get("detail") or "md.link failed",
+            "result": result.get("result") or {},
+        }, 502
+
+    logger.info(
+        "md-link local task succeeded phone=%s task_id=%s elapsed=%.1fs result_keys=%s",
+        phone,
+        task_id,
+        time.time() - request_start,
+        ",".join(sorted((result.get("result") or {}).keys())),
+    )
+    return {
+        "ok": True,
+        "task_id": task_id,
+        **(result.get("result") or {}),
+    }
+
+
+# ---------------------------------------------------------------------------
+# B.6c  POST /api/bot/md-removeall
+# ---------------------------------------------------------------------------
+
+@bot_bp.post("/md-removeall")
+@limiter.limit("5 per minute")
+def post_md_removeall():
+    """
+    Remove all linked companion devices.
+
+    Body: {"phone": "27626947061"}
+    Internally executes: md.remove all
+    """
+    body = request.get_json(silent=True) or {}
+    phone = str(body.get("phone", "")).strip().lstrip("+")
+    if not phone:
+        return {"error": "phone required"}, 400
+    if not phone.isdigit() or not (7 <= len(phone) <= 15):
+        return {"error": "invalid phone number — digits only, 7-15 characters"}, 400
+
+    http_timeout = _coerce_timeout(body.get("timeout"), _BOT_COMMAND_HTTP_TIMEOUT, 10.0, 180.0)
+    payload = {"phone": phone, "timeout": http_timeout}
+
+    try:
+        agent_result = _try_agent_command(phone, "md_removeall", payload, timeout=http_timeout + 5.0)
+    except RuntimeError as exc:
+        return {"error": str(exc)}, 503
+    if agent_result is not None:
+        status = 200 if agent_result.get("ok") else 502
+        return agent_result, status
+    if _BOT_DRIVER_MODE == "agent":
+        return {"error": f"BOT_DRIVER_MODE=agent but no agent manages phone={phone}"}, 503
+
+    start_result = _ensure_local_bot_started(phone)
+    if not start_result.get("ok"):
+        return {"error": start_result.get("error", "failed to start bot"), "phone": phone}, 502
+
+    try:
+        from app.dashboard.utils.bot_command_queue import (
+            cancel_bot_command_task,
+            enqueue_bot_command_task,
+            wait_bot_command_result,
+        )
+        task_id = enqueue_bot_command_task(phone, "md.remove", ["all"], {})
+        result = wait_bot_command_result(task_id, timeout=http_timeout)
+    except Exception as exc:
+        logger.exception("md-removeall queue failed")
+        return {"error": str(exc)}, 500
+
+    if result is None:
+        cancelled = cancel_bot_command_task(task_id)
+        return {
+            "ok": False,
+            "error": "md.remove all did not finish within timeout",
+            "task_id": task_id,
+            "cancelled": cancelled,
+        }, 504
+
+    if not result.get("success"):
+        return {
+            "ok": False,
+            "task_id": task_id,
+            "error": result.get("detail") or "md.remove all failed",
+            "result": result.get("result") or {},
+        }, 502
+
+    return {
+        "ok": True,
+        "task_id": task_id,
+        **(result.get("result") or {}),
+    }
+
+
+# ---------------------------------------------------------------------------
 # B.7  GET /api/bot/start-stream
 # ---------------------------------------------------------------------------
 
@@ -718,6 +1014,115 @@ def get_start_stream():
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _coerce_timeout(value, default: float, minimum: float, maximum: float) -> float:
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        timeout = default
+    return max(minimum, min(maximum, timeout))
+
+
+def _normalize_proxy_param(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        host = str(value.get("host", "")).strip()
+        port = str(value.get("port", "")).strip()
+        username = str(value.get("username", "")).strip()
+        password = str(value.get("password", "")).strip()
+        if not all([host, port, username, password]):
+            raise ValueError("proxy object requires host, port, username and password")
+        value = f"{host}:{port}:{username}:{password}"
+
+    proxy = str(value).strip()
+    if not proxy:
+        return None
+    if proxy.upper() == "DIRECT":
+        return "DIRECT"
+
+    parts = proxy.split(":")
+    if len(parts) != 4 or not all(parts):
+        raise ValueError("proxy must be DIRECT or host:port:username:password")
+    try:
+        int(parts[1])
+    except ValueError as exc:
+        raise ValueError("proxy port must be an integer") from exc
+    return proxy
+
+
+def _ensure_local_bot_started(phone: str, proxy: str | None = None) -> dict:
+    proc = _start_procs.get(phone)
+    if proc is not None and proc.poll() is None:
+        if proxy:
+            logger.info(
+                "Local bot already running in memory phone=%s pid=%s proxy_requested=True",
+                phone,
+                proc.pid,
+            )
+            return {
+                "ok": False,
+                "error": "proxy can only be applied when starting the bot; stop it first",
+                "phone": phone,
+                "already_running": True,
+            }
+        logger.info("Local bot already running in memory phone=%s pid=%s", phone, proc.pid)
+        return {"ok": True, "pid": proc.pid, "phone": phone, "already_running": True}
+
+    status = read_status(phone=phone)
+    pid = status.get("pid")
+    if status.get("running") and pid and _pid_alive(pid):
+        if proxy:
+            logger.info(
+                "Local bot already running from status phone=%s pid=%s proxy_requested=True status=%s",
+                phone,
+                pid,
+                status,
+            )
+            return {
+                "ok": False,
+                "error": "proxy can only be applied when starting the bot; stop it first",
+                "phone": phone,
+                "already_running": True,
+            }
+        logger.info("Local bot already running from status phone=%s pid=%s status=%s", phone, pid, status)
+        return {"ok": True, "pid": pid, "phone": phone, "already_running": True}
+
+    script_path = _resolve_script("main.py")
+    if not script_path.exists():
+        logger.warning("script/main.py not found for md.link phone=%s script_path=%s cwd=%s", phone, script_path, os.getcwd())
+        return {"ok": False, "error": "script/main.py not found", "phone": phone}
+
+    try:
+        args = [sys.executable, str(script_path), phone, "--debug"]
+        if proxy and proxy != "DIRECT":
+            args.extend(["--proxy", proxy])
+        logger.info(
+            "Starting local bot for md.link phone=%s script=%s cwd=%s proxy=%s",
+            phone,
+            script_path,
+            Path.cwd(),
+            bool(proxy and proxy != "DIRECT"),
+        )
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+            cwd=str(Path.cwd()),
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+        )
+        _start_procs[phone] = proc
+        _write_pid_file(proc.pid)
+        _start_drain_thread(proc)
+        logger.info("Bot auto-started for md.link, PID=%s, phone=%s, proxy=%s", proc.pid, phone, bool(proxy and proxy != "DIRECT"))
+        return {"ok": True, "pid": proc.pid, "phone": phone}
+    except OSError as exc:
+        logger.error("Failed to auto-start script/main.py for md.link: %s", exc)
+        return {"ok": False, "error": str(exc), "phone": phone}
+
 
 def _start_drain_thread(proc: "subprocess.Popen") -> None:
     """Start a daemon thread that drains proc.stdout until the process exits.
@@ -1050,7 +1455,8 @@ def import_account():
     Request body:
         {
           "lines":    ["phone,pk1,sk1,pk2,sk2,sixth", ...],
-          "agent_id": "pc"   ← optional; if provided, the import runs on that agent
+          "agent_id": "pc",  ← optional; if provided, the import runs on that agent
+          "env":      "android"  ← optional: android, smb_android, ios, smb_ios
         }
 
     When agent_id is given, the lines are dispatched to the agent via WebSocket
@@ -1063,6 +1469,12 @@ def import_account():
         return {"error": "lines (list) required"}, 400
 
     agent_id = str(body.get("agent_id", "")).strip() or None
+    import_env = str(body.get("env", "android")).strip() or "android"
+    if import_env not in _IMPORT_ENV_VALUES:
+        return {
+            "error": "invalid env",
+            "allowed": sorted(_IMPORT_ENV_VALUES),
+        }, 400
 
     # ── Remote import via agent ──────────────────────────────────────────────
     if agent_id:
@@ -1071,7 +1483,7 @@ def import_account():
         except ImportError:
             return {"error": "agent_gateway not available"}, 500
 
-        result = dispatch_command(agent_id, "import_account", {"lines": lines},
+        result = dispatch_command(agent_id, "import_account", {"lines": lines, "env": import_env},
                                   timeout=max(30.0, len(lines) * 30.0))
         if result is None:
             return {"error": f"Agent '{agent_id}' is not connected or did not respond"}, 503
@@ -1080,6 +1492,7 @@ def import_account():
         return {
             "imported": result.get("imported", 0),
             "total": result.get("total", len(lines)),
+            "env": result.get("env", import_env),
             "results": result.get("results", []),
         }
 
@@ -1092,7 +1505,7 @@ def import_account():
     for line in lines:
         try:
             proc = subprocess.run(
-                [sys.executable, str(script_path), line],
+                [sys.executable, str(script_path), line, "--env", import_env],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -1114,7 +1527,7 @@ def import_account():
             results.append({"line": line[:20] + "...", "ok": False, "stderr": str(exc)})
 
     success = sum(1 for r in results if r["ok"])
-    return {"imported": success, "total": len(results), "results": results}
+    return {"imported": success, "total": len(results), "env": import_env, "results": results}
 
 
 # ---------------------------------------------------------------------------

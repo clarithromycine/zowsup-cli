@@ -613,7 +613,11 @@ class Utils:
         payload.signature = Curve.calculateSignature(privateKey,payload.details.SerializeToString())
 
         return payload
-    
+
+    @classmethod
+    def b64str(cls, companionProps):
+        return base64.b64encode(companionProps).decode()
+
 
 
 
